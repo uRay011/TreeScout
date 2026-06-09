@@ -67,7 +67,7 @@ TreeScout/
 
 - **Phase 1 (MVP)**: Tauri v2初期化 → Everything DLL FFI → 基本検索UI
 - **Phase 2 (AI+A*)**: Lindera → A*エンジン（Rustクレート独立実装・単体テスト） → 2フェーズ検索統合 → λ・μチューニング評価セット
-- **Phase 3 (LoRA改修、任意)**: Unsloth + llm-jp-3-1.8b LoRA → GGUF変換
+- **Phase 3 (LoRA改修、任意・保留中)**: Unsloth + llm-jp-3-1.8b LoRA → GGUF変換 ※LLM活用は一旦保留、Phase 5以降に再検討
 - **Phase 4 (探索UI)**: 埋め込みint8 BLOB永続化＋mmap常駐 → カラムUI/ヒートマップ → Tauri Channelストリーミング
 - **Phase 5 (Polish)**: キーボードショートカット → A*探索 <150ms プロファイリング → インストーラー
 
