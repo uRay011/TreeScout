@@ -4,20 +4,6 @@ import { ResultList } from "./components/SearchBar/ResultList";
 import { searchFiles, SearchResult } from "./lib/tauri";
 import "./App.css";
 
-// ── モックデータ（Everything FFI 実装前の開発用） ──
-const MOCK_RESULTS: SearchResult[] = [
-  { name: "button.css",       path: "C:\\src\\styles\\button.css",                  folder: "src\\styles",          size: 921,   modified: "2026-06-01", ext: "css"  },
-  { name: "button.md",        path: "C:\\docs\\components\\button.md",               folder: "docs\\components",     size: 1536,  modified: "2026-05-20", ext: "md"   },
-  { name: "Button.test.tsx",  path: "C:\\tests\\components\\Button.test.tsx",        folder: "tests\\components",    size: 4198,  modified: "2026-06-05", ext: "tsx"  },
-  { name: "Button.tsx",       path: "C:\\src\\components\\Button\\Button.tsx",       folder: "src\\components\\Button", size: 2457, modified: "2026-06-08", ext: "tsx"  },
-  { name: "ButtonGroup.tsx",  path: "C:\\src\\components\\Button\\ButtonGroup.tsx",  folder: "src\\components\\Button", size: 3276, modified: "2026-06-06", ext: "tsx"  },
-  { name: "ButtonIcon.tsx",   path: "C:\\src\\components\\Button\\ButtonIcon.tsx",   folder: "src\\components\\Button", size: 1331, modified: "2026-06-03", ext: "tsx"  },
-  { name: "index.ts",         path: "C:\\src\\components\\Button\\index.ts",         folder: "src\\components\\Button", size: 204,  modified: "2026-06-08", ext: "ts"   },
-  { name: "ModalButton.tsx",  path: "C:\\src\\components\\Modal\\ModalButton.tsx",   folder: "src\\components\\Modal",  size: 2048, modified: "2026-05-28", ext: "tsx"  },
-  { name: "NavButton.tsx",    path: "C:\\src\\components\\Nav\\NavButton.tsx",       folder: "src\\components\\Nav",    size: 1843, modified: "2026-05-30", ext: "tsx"  },
-  { name: "useButton.ts",     path: "C:\\src\\hooks\\useButton.ts",                  folder: "src\\hooks",           size: 1126,  modified: "2026-06-07", ext: "ts"   },
-];
-
 // ── ロゴSVG ──────────────────────────────────────
 function LogoMark() {
   return (
@@ -55,11 +41,11 @@ function WindowControls() {
 const MENU_ITEMS = ["ファイル", "編集", "表示", "検索", "ブックマーク", "ツール", "ヘルプ"];
 
 export default function App() {
-  const [query,         setQuery]         = useState("Reactのボタンコンポーネント");
-  const [results,       setResults]       = useState<SearchResult[]>(MOCK_RESULTS);
-  const [selectedIndex, setSelectedIndex] = useState(4); // ButtonGroup.tsx を初期選択
+  const [query,         setQuery]         = useState("");
+  const [results,       setResults]       = useState<SearchResult[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
   const [isLoading,     setIsLoading]     = useState(false);
-  const [elapsed,       setElapsed]       = useState(0.14);
+  const [elapsed,       setElapsed]       = useState(0);
   const [menuOpen,      setMenuOpen]      = useState(false);
 
   // ペイン分割リサイズ
@@ -81,11 +67,7 @@ export default function App() {
       setResults(normalized);
       setElapsed((performance.now() - t0) / 1000);
     } catch {
-      // Everything 未起動またはビルド前のためモックにフォールバック
-      const filtered = MOCK_RESULTS.filter(r =>
-        r.name.toLowerCase().includes(query.toLowerCase())
-      );
-      setResults(filtered.length ? filtered : MOCK_RESULTS);
+      setResults([]);
       setElapsed((performance.now() - t0) / 1000);
     } finally {
       setIsLoading(false);
@@ -201,7 +183,7 @@ export default function App() {
             <span className="path-label">ルート</span>
             <input
               className="path-input"
-              defaultValue="C:\src\"
+              defaultValue=""
               aria-label="ルートパス"
               readOnly
             />
@@ -258,7 +240,9 @@ export default function App() {
         <span className="status-text">
           {isLoading
             ? "検索中…"
-            : `${results.length}件 · ${elapsed.toFixed(2)}s`}
+            : elapsed === 0
+              ? "検索ワードを入力してください"
+              : `${results.length}件 · ${elapsed.toFixed(2)}s`}
         </span>
       </footer>
     </div>
