@@ -237,8 +237,9 @@ Unsloth（高速・省メモリLoRA）
 ```toml
 lindera = { version = "0.33", features = ["ipadic"] }  # IPAdic辞書同梱
 ```
-- 「議事録」→「議事/録」に分割 → Everythingクエリの精度向上
+- 複合語を分割してベクトル化 → embedding精度向上（例:「議事録作成手順書」→「議事録/作成/手順書」）
 - 日英クロス検索：日本語クエリで英語ファイル名にもヒット（embedding空間で接続）
+- ※ Everythingクエリには分割後トークンを使わない（部分文字列マッチのためノイズになる）
 - pure Rustで動作、MeCabのような外部インストール不要
 
 > ⚠ **バンドルサイズ注意**：`ipadic` feature は辞書(~50MB+)をバイナリに埋め込み、**<30MB目標を単独で超過する**。対策候補（実装時にインストーラサイズで判断）：
@@ -414,6 +415,7 @@ Phase 2: A*ツリー探索（セマンティック絞り込み）          <150m
           ▼
   [Lindera 形態素解析]
   "先週/編集/した/React/の/コンポーネント/ファイル"
+  ※ embedding精度向上・クロス言語検索のためのトークン化（Everythingクエリには直接使用しない）
           │
           ▼
   [ルールベースパーサー（Rust）]
@@ -481,11 +483,11 @@ fn detect_lang(input: &str) -> Lang {
 
 ## 5. 開発フェーズ計画
 
-### Phase 1 — MVP (4週間)
-- [ ] Tauri v2 プロジェクト初期化
-- [ ] Everything DLL Rust FFI バインディング
-- [ ] 基本検索UI（cmdk ベース）
-- [ ] キーワード検索の動作確認（日英両対応）
+### Phase 1 — MVP (4週間) ✅ 完了
+- [x] Tauri v2 プロジェクト初期化
+- [x] Everything DLL Rust FFI バインディング
+- [x] 基本検索UI（cmdk ベース）
+- [x] キーワード検索の動作確認（日英両対応）
 
 ### Phase 2 — A*エンジン＋セマンティック検索 (5週間)
 - [ ] Lindera 形態素解析統合
