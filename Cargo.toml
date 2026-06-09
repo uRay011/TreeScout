@@ -2,5 +2,6 @@
 members = [
     "src-tauri",
     "crates/search",
+    "crates/nlp",
 ]
 resolver = "2"

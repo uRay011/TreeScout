@@ -1,0 +1,19 @@
+[package]
+name = "nlp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "2"
+
+# ipadic 埋め込みは ~50MB になるためデフォルト無効。
+# feature フラグで切替可能にし、インストーラサイズ測定後に判断する。
+[dependencies.lindera]
+version = "3"
+default-features = false
+
+[features]
+# デフォルト: 辞書なし（fallback は ASCII トークナイザ）
+default = []
+# IPAdic 辞書をバイナリに埋め込む（精度優先・バンドルサイズ増大）
+embed-ipadic = ["lindera/embed-ipadic", "lindera/lindera-ipadic"]
