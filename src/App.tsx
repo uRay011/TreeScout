@@ -71,11 +71,17 @@ export default function App() {
     setIsLoading(true);
     const t0 = performance.now();
     try {
-      const res = await searchFiles(query);
-      setResults(res.results);
-      setElapsed(res.elapsed_ms / 1000);
+      const items = await searchFiles(query);
+      // size/modified は現状 Everything から取れないためデフォルト値を補完
+      const normalized = items.map(r => ({
+        ...r,
+        size: r.size ?? 0,
+        modified: r.modified ?? "",
+      }));
+      setResults(normalized);
+      setElapsed((performance.now() - t0) / 1000);
     } catch {
-      // Everything 未実装のためモックにフォールバック
+      // Everything 未起動またはビルド前のためモックにフォールバック
       const filtered = MOCK_RESULTS.filter(r =>
         r.name.toLowerCase().includes(query.toLowerCase())
       );

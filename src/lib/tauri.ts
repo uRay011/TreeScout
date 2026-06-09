@@ -4,17 +4,13 @@ export interface SearchResult {
   name: string;
   path: string;
   folder: string;
+  is_dir: boolean;
+  ext: string;
+  // Everything SDK は現状 size/modified を返さない（Phase2以降で追加予定）
   size: number;
   modified: string;
-  ext: string;
 }
 
-export interface SearchResponse {
-  results: SearchResult[];
-  total: number;
-  elapsed_ms: number;
-}
-
-export async function searchFiles(query: string): Promise<SearchResponse> {
-  return invoke<SearchResponse>("search_files", { query });
+export async function searchFiles(query: string, max = 200): Promise<SearchResult[]> {
+  return invoke<SearchResult[]>("search_files", { query, max });
 }

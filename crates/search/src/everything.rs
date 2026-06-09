@@ -20,8 +20,11 @@ pub enum SearchError {
 
 #[derive(Debug, Serialize)]
 pub struct SearchResult {
+    pub name: String,
     pub path: String,
+    pub folder: String,
     pub is_dir: bool,
+    pub ext: String,
 }
 
 // Everything SDK エラーコード
@@ -129,10 +132,21 @@ pub fn search(query: &str, max: u32) -> Result<Vec<SearchResult>, SearchError> {
             let dir = pcwstr_to_string((api.get_result_path_w)(i));
             let is_file = (api.is_file_result)(i) != 0;
 
-            let path = PathBuf::from(&dir).join(&name);
+            let full_path = PathBuf::from(&dir).join(&name);
+            let ext = if is_file {
+                PathBuf::from(&name)
+                    .extension()
+                    .map(|e| e.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
             results.push(SearchResult {
-                path: path.to_string_lossy().into_owned(),
+                name,
+                path: full_path.to_string_lossy().into_owned(),
+                folder: dir,
                 is_dir: !is_file,
+                ext,
             });
         }
 
