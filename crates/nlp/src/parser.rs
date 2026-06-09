@@ -78,10 +78,31 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     result.path_filter = extract_path(input);
 
     // -- 残余キーワード --
-    // 上で消費したパターンを除いたトークンをキーワードに
+    // パス・拡張子・日付・サイズとして消費済みのトークンを除外する。
+    let consumed_path = result.path_filter.as_deref().unwrap_or("");
     for token in input.split_whitespace() {
         let t = token.to_lowercase();
         if is_noise_token(&t) {
+            continue;
+        }
+        // `path:foo` 直接構文トークンを除外
+        if t.starts_with("path:") || t.starts_with("ext:") || t.starts_with("dm:") || t.starts_with("size:") {
+            continue;
+        }
+        // スラッシュ含みトークン（パスとして消費済み）を除外
+        if token.contains('/') && !token.starts_with("http") {
+            continue;
+        }
+        // 拡張子エイリアスとして消費済みの単語を除外
+        if !result.extensions.is_empty() && is_extension_alias(&t) {
+            continue;
+        }
+        // 日付キーワードを除外
+        if result.date_modified.is_some() && is_date_keyword(&t) {
+            continue;
+        }
+        // consumed_path がある場合、そのパスを含むトークンを除外
+        if !consumed_path.is_empty() && token.starts_with(consumed_path) {
             continue;
         }
         remaining_tokens.push(token);
@@ -276,14 +297,67 @@ fn extract_path(input: &str) -> Option<String> {
         }
     }
 
-    // src/ のようなパス表記（スラッシュ含む単語）
+    // src/ のようなパス表記（スラッシュを含むトークン）
+    // スラッシュまでの部分だけをパスとして切り出す。
+    // 例: "src/のTypeScript" → "src/"
     for token in input.split_whitespace() {
-        if token.contains('/') && !token.starts_with("http") {
-            return Some(token.to_string());
+        if token.starts_with("http") {
+            continue;
+        }
+        if let Some(slash_pos) = token.find('/') {
+            // スラッシュの直後が ASCII 英数字やパス文字ならディレクトリ指定とみなす
+            let after_slash = &token[slash_pos + 1..];
+            let is_path = after_slash.is_empty()
+                || after_slash
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+                    .unwrap_or(false);
+            if is_path {
+                // スラッシュ以降も有効なパス文字が続く間だけ取る
+                let path_end = slash_pos
+                    + 1
+                    + after_slash
+                        .find(|c: char| {
+                            !c.is_ascii_alphanumeric() && !matches!(c, '_' | '-' | '.' | '/')
+                        })
+                        .unwrap_or(after_slash.len());
+                return Some(token[..path_end].to_string());
+            }
         }
     }
 
     None
+}
+
+fn is_extension_alias(t: &str) -> bool {
+    matches!(
+        t,
+        "pdf" | "excel" | "エクセル" | "xlsx" | "xls"
+        | "word" | "ワード" | "docx" | "doc"
+        | "powerpoint" | "パワーポイント" | "pptx" | "ppt"
+        | "python" | "パイソン" | "rust" | "ラスト"
+        | "typescript" | "タイプスクリプト" | "tsx"
+        | "javascript" | "ジャバスクリプト" | "jsx"
+        | "markdown" | "マークダウン"
+        | "csv" | "json" | "toml" | "yaml" | "yml"
+        | "zip" | "アーカイブ"
+        | "画像" | "image" | "img"
+        | "動画" | "video" | "movie"
+        | "音楽" | "音声" | "audio"
+        | "テキスト"
+    )
+}
+
+fn is_date_keyword(t: &str) -> bool {
+    matches!(
+        t,
+        "今日" | "本日" | "today"
+        | "昨日" | "yesterday"
+        | "今週" | "先週" | "lastweek"
+        | "今月" | "先月"
+        | "今年" | "去年" | "昨年"
+    )
 }
 
 /// 日付・サイズ・拡張子ルールが消費するノイズトークンを除外する。
