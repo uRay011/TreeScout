@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TreeScout</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+  :root {
+    --bg:         #0d1117;
+    --bg2:        #161b22;
+    --bg3:        #1c2128;
+    --bg4:        #262c36;
+    --bg5:        #2d333b;
+    --border:     #373e47;
+    --text:       #cdd9e5;
+    --text2:      #768390;
+    --text3:      #545d68;
+    --accent:     #316dca;
+    --sel-bg:     #1c2d3f;
+    --sel-border: #316dca;
+    --h9: hsl(215,70%,62%); --h8: hsl(215,65%,52%); --h7: hsl(215,58%,44%);
+    --h6: hsl(215,50%,37%); --h5: hsl(215,42%,31%); --h4: hsl(215,34%,26%);
+    --h3: hsl(215,26%,22%); --h2: hsl(215,18%,18%);
+    --folder:   #c69026;
+    --c-tsx:    #58a6ff;
+    --c-ts:     #3b82f6;
+    --c-css:    #7ee8fa;
+    --c-md:     #768390;
+    --c-json:   #e3b341;
+    --c-rs:     #f07178;
+    --c-toml:   #e8b250;
+    --c-other:  #6e7681;
+    --font: 'Inter', 'Segoe UI', 'Yu Gothic UI', sans-serif;
+
+    /* resizer */
+    --left-w: 520px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font);
+    font-size: 12px;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+
+  /* ═══════════════════════════════════════
+     TITLEBAR (custom window chrome)
+  ═══════════════════════════════════════ */
+  .titlebar {
+    height: 36px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    /* drag region — Tauri will use this */
+    -webkit-app-region: drag;
+  }
+
+  /* Logo zone — left */
+  .titlebar-logo {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 14px;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
+  }
+  .logo-mark {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+  .logo-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.01em;
+  }
+
+  /* Menu items — left of center */
+  .titlebar-menu {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-shrink: 0;
+    overflow: hidden;
+    -webkit-app-region: no-drag;
+  }
+  .menu-btn {
+    background: none;
+    border: none;
+    color: var(--text2);
+    font: 400 12px var(--font);
+    padding: 0 10px;
+    height: 36px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.1s, color 0.1s;
+    flex-shrink: 0;
+  }
+  .menu-btn:hover { background: var(--bg4); color: var(--text); }
+
+  /* ハンバーガーボタン（メニューが収まらない時に表示） */
+  .menu-hamburger {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text2);
+    padding: 0 10px;
+    height: 36px;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex-direction: column;
+    flex-shrink: 0;
+    transition: background 0.1s, color 0.1s;
+  }
+  .menu-hamburger:hover { background: var(--bg4); color: var(--text); }
+  .menu-hamburger span {
+    display: block;
+    width: 14px;
+    height: 1.5px;
+    background: currentColor;
+    border-radius: 1px;
+  }
+
+  /* ドロップダウンメニュー */
+  .menu-dropdown {
+    display: none;
+    position: fixed;
+    top: 36px;
+    left: 0;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 0 0 6px 6px;
+    z-index: 1000;
+    min-width: 140px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+    flex-direction: column;
+  }
+  .menu-dropdown.open { display: flex; }
+  .menu-dropdown .menu-btn {
+    width: 100%;
+    text-align: left;
+    padding: 0 16px;
+    border-radius: 0;
+  }
+
+  /* Search — centered absolutely */
+  .titlebar-search-center {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    -webkit-app-region: no-drag;
+  }
+  .search-wrap {
+    display: flex;
+    align-items: center;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0 10px;
+    gap: 6px;
+    width: 320px;
+    transition: border-color 0.15s;
+  }
+  .search-wrap:focus-within {
+    border-color: var(--accent);
+  }
+  .search-icon { color: var(--text3); font-size: 13px; flex-shrink: 0; line-height: 1; }
+  .search-input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font: 400 13px var(--font);
+    padding: 5px 0;
+    user-select: text;
+  }
+  .search-input::placeholder { color: var(--text3); }
+
+  /* Window controls — right */
+  .titlebar-winctrls {
+    margin-left: auto;
+    display: flex;
+    align-items: stretch;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
+  }
+  .winctrl {
+    background: none;
+    border: none;
+    color: var(--text2);
+    width: 46px;
+    height: 36px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s, color 0.1s;
+  }
+  .winctrl:hover { background: var(--bg4); color: var(--text); }
+  .winctrl.close:hover { background: #c42b1c; color: #fff; }
+  .winctrl svg { pointer-events: none; }
+
+  /* ═══════════════════════════════════════
+     MAIN SPLIT AREA
+  ═══════════════════════════════════════ */
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ─── Left pane ─── */
+  .left-pane {
+    width: var(--left-w);
+    min-width: 200px;
+    max-width: calc(100vw - 280px);
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .list-header {
+    display: flex;
+    padding: 0 12px;
+    font-size: 11px;
+    color: var(--text3);
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .list-header .col-h {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 4px 3px 0;
+    cursor: pointer;
+    transition: color 0.1s;
+    white-space: nowrap;
+    overflow: hidden;
+    min-width: 40px;
+    position: relative;
+  }
+  .list-header .col-h:hover { color: var(--text); }
+  .col-h.sorted { color: var(--text2); }
+  .sort-arrow { font-size: 9px; opacity: 0.7; }
+  /* 名前列は flex:1 で余白を埋める */
+  .col-h-name { flex: 1; }
+  .col-h-fixed { flex-shrink: 0; }
+
+  /* 列ヘッダーは position:relative で右端にリサイザーを絶対配置 */
+  .col-h-fixed { position: relative; overflow: visible !important; }
+
+  /* 列リサイザー: 列の右端に絶対配置 */
+  .col-resizer {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    cursor: col-resize;
+    background: transparent;
+    transition: background 0.12s;
+    z-index: 5;
+  }
+  .col-resizer:hover, .col-resizer.dragging { background: var(--accent); }
+
+  .file-list { overflow-y: auto; flex: 1; }
+  .file-list::-webkit-scrollbar { width: 6px; }
+  .file-list::-webkit-scrollbar-track { background: transparent; }
+  .file-list::-webkit-scrollbar-thumb { background: var(--bg5); border-radius: 3px; }
+
+  .file-row {
+    display: flex;
+    padding: 4px 12px;
+    cursor: pointer;
+    align-items: center;
+    position: relative;
+    transition: background 0.08s;
+  }
+  .file-row > .file-name { flex: 1; min-width: 0; }
+  .file-row > .folder-col,
+  .file-row > .size-col,
+  .file-row > .date-col { flex-shrink: 0; }
+  .file-row:hover { background: var(--bg3); }
+  .file-row.selected { background: var(--sel-bg); }
+  .file-row.selected::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--sel-border);
+    border-radius: 0 1px 1px 0;
+  }
+
+  .file-name { display: flex; align-items: center; gap: 6px; overflow: hidden; }
+  /* ─── File type icon badge ─── */
+  .ext-badge {
+    flex-shrink: 0;
+    width: 26px;
+    height: 18px;
+    border-radius: 3px;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.9;
+  }
+  .ext-tsx  { background: rgba(88,166,255,0.18); color: var(--c-tsx);  border: 1px solid rgba(88,166,255,0.25); }
+  .ext-ts   { background: rgba(59,130,246,0.18); color: var(--c-ts);   border: 1px solid rgba(59,130,246,0.25); }
+  .ext-css  { background: rgba(126,232,250,0.14); color: var(--c-css);  border: 1px solid rgba(126,232,250,0.20); }
+  .ext-md   { background: rgba(118,131,144,0.18); color: var(--c-md);   border: 1px solid rgba(118,131,144,0.25); }
+  .ext-json { background: rgba(227,179,65,0.15);  color: var(--c-json); border: 1px solid rgba(227,179,65,0.22); }
+  .ext-rs   { background: rgba(240,113,120,0.15); color: var(--c-rs);   border: 1px solid rgba(240,113,120,0.22); }
+  .ext-toml { background: rgba(232,178,80,0.15);  color: var(--c-toml); border: 1px solid rgba(232,178,80,0.22); }
+  .ext-other{ background: rgba(110,118,129,0.15); color: var(--c-other);border: 1px solid rgba(110,118,129,0.22); }
+
+  .file-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .folder-col { color: var(--text3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .size-col   { color: var(--text2); font-size: 11px; }
+  .date-col   { color: var(--text2); font-size: 11px; }
+
+  /* ═══════════════════════════════════════
+     RESIZER
+  ═══════════════════════════════════════ */
+  .resizer {
+    width: 4px;
+    flex-shrink: 0;
+    background: transparent;
+    cursor: col-resize;
+    position: relative;
+    z-index: 10;
+    transition: background 0.15s;
+  }
+  .resizer:hover,
+  .resizer.dragging { background: var(--accent); }
+
+  /* ─── Right pane ─── */
+  .right-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 200px;
+  }
+
+  /* Root path bar */
+  .path-bar {
+    height: 32px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .path-label { color: var(--text3); font-size: 11px; white-space: nowrap; }
+  .path-input {
+    flex: 1;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font: 400 11px var(--font);
+    color: var(--text2);
+    outline: none;
+    user-select: text;
+  }
+  .btn-sm {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text2);
+    font: 400 11px var(--font);
+    padding: 3px 10px;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+    white-space: nowrap;
+  }
+  .btn-sm:hover { background: var(--bg5); color: var(--text); }
+  .btn-primary {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    color: #fff;
+    font: 500 11px var(--font);
+    padding: 3px 12px;
+    cursor: pointer;
+    transition: filter 0.1s;
+    white-space: nowrap;
+  }
+  .btn-primary:hover { filter: brightness(1.15); }
+
+  /* ─── Column explorer ─── */
+  .columns-scroll {
+    flex: 1;
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 10px;
+    gap: 1px;
+    background: var(--bg);
+  }
+  .columns-scroll::-webkit-scrollbar { height: 5px; }
+  .columns-scroll::-webkit-scrollbar-thumb { background: var(--bg5); border-radius: 3px; }
+
+  .col-panel {
+    flex-shrink: 0;
+    width: 200px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .col-panel.detail-card { width: 220px; }
+
+  .col-head {
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--text3);
+    background: var(--bg3);
+    border-bottom: 1px solid var(--border);
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .col-body { overflow-y: auto; flex: 1; }
+  .col-body::-webkit-scrollbar { width: 4px; }
+  .col-body::-webkit-scrollbar-thumb { background: var(--bg5); border-radius: 2px; }
+
+  .col-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    cursor: pointer;
+    overflow: hidden;
+    transition: background 0.08s;
+  }
+  .col-item:hover { background: var(--bg4); }
+  .col-item.active { background: var(--sel-bg); }
+  .col-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 0 1px 1px 0;
+  }
+  .col-item.skip { opacity: 0.35; }
+
+  .heat {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.18;
+  }
+  .heat.h9 { background: var(--h9); } .heat.h8 { background: var(--h8); }
+  .heat.h7 { background: var(--h7); } .heat.h6 { background: var(--h6); }
+  .heat.h5 { background: var(--h5); } .heat.h4 { background: var(--h4); }
+  .heat.h3 { background: var(--h3); } .heat.h2 { background: var(--h2); }
+
+  .col-icon   { font-size: 12px; z-index: 1; flex-shrink: 0; }
+  .col-name   { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); z-index: 1; }
+  .col-chevron{ color: var(--text3); font-size: 10px; z-index: 1; flex-shrink: 0; }
+
+  /* detail card */
+  .detail-card .col-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .detail-filename { font-size: 13px; font-weight: 600; color: var(--text); word-break: break-all; }
+  .detail-table { display: flex; flex-direction: column; gap: 5px; }
+  .detail-row   { display: flex; gap: 8px; align-items: baseline; }
+  .detail-key   { width: 44px; font-size: 10px; color: var(--text3); flex-shrink: 0; }
+  .detail-val   { font-size: 11px; color: var(--text2); }
+
+  /* ─── Statusbar ─── */
+  .statusbar {
+    height: 20px;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    gap: 10px;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text3);
+  }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #3fb950; flex-shrink: 0; }
+  .status-text { color: var(--text2); }
+
+  /* SVG icon helpers */
+  .ico-folder { color: var(--folder); }
+  .ico-file-tsx  { color: var(--c-tsx); }
+  .ico-file-ts   { color: var(--c-ts); }
+</style>
+</head>
+<body>
+
+<!-- ══════════════ TITLEBAR ══════════════ -->
+<div class="titlebar">
+
+  <!-- Logo -->
+  <div class="titlebar-logo">
+    <svg class="logo-mark" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Tree trunk -->
+      <rect x="9" y="13" width="2" height="4" rx="0.5" fill="#8b949e"/>
+      <!-- Foliage layers -->
+      <polygon points="10,2 16,9 4,9"  fill="#3fb950" opacity="0.9"/>
+      <polygon points="10,5 15,11 5,11" fill="#2ea043" opacity="0.85"/>
+      <polygon points="10,8 14,13 6,13" fill="#238636" opacity="0.8"/>
+      <!-- Lens overlay -->
+      <circle cx="14" cy="14" r="3.5" stroke="#316dca" stroke-width="1.5" fill="none"/>
+      <line x1="16.5" y1="16.5" x2="18.5" y2="18.5" stroke="#316dca" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    <span class="logo-name">TreeScout</span>
+  </div>
+
+  <!-- Menu -->
+  <div class="titlebar-menu" id="titlebarMenu">
+    <button class="menu-btn">ファイル</button>
+    <button class="menu-btn">編集</button>
+    <button class="menu-btn">表示</button>
+    <button class="menu-btn">検索</button>
+    <button class="menu-btn">ブックマーク</button>
+    <button class="menu-btn">ツール</button>
+    <button class="menu-btn">ヘルプ</button>
+  </div>
+  <!-- ハンバーガー（幅不足時） -->
+  <button class="menu-hamburger" id="menuHamburger" onclick="toggleMenuDropdown()">
+    <span></span><span></span><span></span>
+  </button>
+  <!-- ドロップダウン -->
+  <div class="menu-dropdown" id="menuDropdown">
+    <button class="menu-btn">ファイル</button>
+    <button class="menu-btn">編集</button>
+    <button class="menu-btn">表示</button>
+    <button class="menu-btn">検索</button>
+    <button class="menu-btn">ブックマーク</button>
+    <button class="menu-btn">ツール</button>
+    <button class="menu-btn">ヘルプ</button>
+  </div>
+
+  <!-- Search (centered) -->
+  <div class="titlebar-search-center">
+    <div class="search-wrap">
+      <svg class="search-icon" width="13" height="13" viewBox="0 0 16 16" fill="none">
+        <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="10" y1="10" x2="14" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <input class="search-input" value="Reactのボタンコンポーネント" id="searchInput" placeholder="ファイルを自然言語で検索…">
+    </div>
+  </div>
+
+  <!-- Window controls -->
+  <div class="titlebar-winctrls">
+    <!-- Minimize -->
+    <button class="winctrl" title="最小化">
+      <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>
+    </button>
+    <!-- Maximize -->
+    <button class="winctrl" title="最大化">
+      <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" fill="none"/></svg>
+    </button>
+    <!-- Close -->
+    <button class="winctrl close" title="閉じる">
+      <svg width="10" height="10" viewBox="0 0 10 10">
+        <line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+</div>
+
+<!-- ══════════════ MAIN ══════════════ -->
+<div class="main">
+
+  <!-- Left pane -->
+  <div class="left-pane" id="leftPane">
+    <div class="list-header" id="listHeader">
+      <div class="col-h col-h-name sorted" data-col="name" onclick="sortBy('name')">
+        <span>名前</span><span class="sort-arrow">↑</span>
+      </div>
+      <div class="col-h col-h-fixed" id="col-h-folder" data-col="folder" onclick="sortBy('folder')" style="width:150px">
+        <span>フォルダ</span>
+        <div class="col-resizer" data-resizer="folder"></div>
+      </div>
+      <div class="col-h col-h-fixed" id="col-h-size" data-col="size" onclick="sortBy('size')" style="width:60px">
+        <span>サイズ</span>
+        <div class="col-resizer" data-resizer="size"></div>
+      </div>
+      <div class="col-h col-h-fixed" id="col-h-date" data-col="date" onclick="sortBy('date')" style="width:86px">
+        <span>更新日時</span>
+        <div class="col-resizer" data-resizer="date"></div>
+      </div>
+    </div>
+    <div class="file-list">
+
+      <div class="file-row" onclick="selRow(this)">
+        <div class="file-name">
+          <span class="ext-badge ext-css">CSS</span>
+          <span class="file-text">button.css</span>
+        </div>
+        <div class="folder-col rc-folder">src\styles</div>
+        <div class="size-col rc-size">0.9 KB</div>
+        <div class="date-col rc-date">2026-06-01</div>
+      </div>
+
+      <div class="file-row" onclick="selRow(this)">
+        <div class="file-name">
+          <span class="ext-badge ext-md">MD</span>
+          <span class="file-text">button.md</span>
+        </div>
+        <div class="folder-col rc-folder">docs\components</div>
+        <div class="size-col rc-size">1.5 KB</div>
+        <div class="date-col rc-date">2026-05-20</div>
+      </div>
+
+      <div class="file-row" onclick="selRow(this)">
+        <div class="file-name">
+          <span class="ext-badge ext-tsx">TSX</span>
+          <span class="file-text">Button.test.tsx</span>
+        </div>
+        <div class="folder-col rc-folder">tests\components</div>
+        <div class="size-col rc-size">4.1 KB</div>
+        <div class="date-col rc-date">2026-06-05</div>
+      </div>
+
+      <div class="file-row" onclick="selRow(this)">
+        <div class="file-name">
+          <span class="ext-badge ext-tsx">TSX</span>
+          <span class="file-text">Button.tsx</span>
+        </div>
+        <div class="folder-col rc-folder">src\components\Button</div>
+        <div class="size-col rc-size">2.4 KB</div>
+        <div class="date-col rc-date">2026-06-08</div>
+      </div>
+
+      <div class="file-row selected" onclick="selRow(this)">
+        <div class="file-name">
+          <span class="ext-badge ext-tsx">TSX</span>
+          <span class="file-text">ButtonGroup.tsx</span>
+        </div>
+        <div class="folder-col rc-folder">src\components\Button</div>
+        <div class="size-col rc-size">3.2 KB</div>
+        <div class="date-col rc-date">2026-06-06</div>
+      </div>
+
+      <div class="file-row" onclick="selRow(this)">
+        <div class="file-name">
+          <span class="ext-badge ext-tsx">TSX</span>
+          <span class="file-text">ButtonIcon.tsx</span>
+        </div>
+        <div class="folder-col rc-folder">src\components\Button</div>
+        <div class="size-col rc-size">1.3 KB</div>
+        <div class="date-col rc-date">2026-06-03</div>
+      </div>
+
+      <div class="file-row" onclick="selRow(this)">
+        <div class="file-name">
+          <span class="ext-badge ext-ts">TS</span>
+          <span class="file-text">index.ts</span>
+        </div>
+        <div class="folder-col rc-folder">src\components\Button</div>
+        <div class="size-col rc-size">0.2 KB</div>
+        <div class="date-col rc-date">2026-06-08</div>
+      </div>
+
+      <div class="file-row" onclick="selRow(this)">
+        <div class="file-name">
+          <span class="ext-badge ext-tsx">TSX</span>
+          <span class="file-text">ModalButton.tsx</span>
+        </div>
+        <div class="folder-col rc-folder">src\components\Modal</div>
+        <div class="size-col rc-size">2.0 KB</div>
+        <div class="date-col rc-date">2026-05-28</div>
+      </div>
+
+      <div class="file-row" onclick="selRow(this)">
+        <div class="file-name">
+          <span class="ext-badge ext-tsx">TSX</span>
+          <span class="file-text">NavButton.tsx</span>
+        </div>
+        <div class="folder-col rc-folder">src\components\Nav</div>
+        <div class="size-col rc-size">1.8 KB</div>
+        <div class="date-col rc-date">2026-05-30</div>
+      </div>
+
+      <div class="file-row" onclick="selRow(this)">
+        <div class="file-name">
+          <span class="ext-badge ext-ts">TS</span>
+          <span class="file-text">useButton.ts</span>
+        </div>
+        <div class="folder-col rc-folder">src\hooks</div>
+        <div class="size-col rc-size">1.1 KB</div>
+        <div class="date-col rc-date">2026-06-07</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Resizer -->
+  <div class="resizer" id="resizer"></div>
+
+  <!-- Right pane -->
+  <div class="right-pane" id="rightPane">
+
+    <!-- Root path bar -->
+    <div class="path-bar">
+      <span class="path-label">ルート</span>
+      <input class="path-input" value="C:\src\">
+      <button class="btn-sm">参照</button>
+      <button class="btn-primary">適用</button>
+    </div>
+
+    <!-- Columns -->
+    <div class="columns-scroll">
+
+      <!-- Col 0: root -->
+      <div class="col-panel">
+        <div class="col-head">ルート</div>
+        <div class="col-body">
+          <div class="col-item active">
+            <div class="heat h9"></div>
+            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
+            <span class="col-name">src/</span>
+            <span class="col-chevron">›</span>
+          </div>
+          <div class="col-item skip">
+            <div class="heat h3"></div>
+            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
+            <span class="col-name">docs/</span>
+            <span class="col-chevron">›</span>
+          </div>
+          <div class="col-item skip">
+            <div class="heat h2"></div>
+            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
+            <span class="col-name">tests/</span>
+            <span class="col-chevron">›</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Col 1: src/ -->
+      <div class="col-panel">
+        <div class="col-head">SRC/</div>
+        <div class="col-body">
+          <div class="col-item active">
+            <div class="heat h9"></div>
+            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
+            <span class="col-name">components/</span>
+            <span class="col-chevron">›</span>
+          </div>
+          <div class="col-item">
+            <div class="heat h7"></div>
+            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
+            <span class="col-name">hooks/</span>
+            <span class="col-chevron">›</span>
+          </div>
+          <div class="col-item skip">
+            <div class="heat h2"></div>
+            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
+            <span class="col-name">utils/</span>
+            <span class="col-chevron">›</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Col 2: components/ -->
+      <div class="col-panel">
+        <div class="col-head">COMPONENTS/</div>
+        <div class="col-body">
+          <div class="col-item active">
+            <div class="heat h9"></div>
+            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
+            <span class="col-name">Button/</span>
+            <span class="col-chevron">›</span>
+          </div>
+          <div class="col-item">
+            <div class="heat h5"></div>
+            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
+            <span class="col-name">Nav/</span>
+            <span class="col-chevron">›</span>
+          </div>
+          <div class="col-item">
+            <div class="heat h5"></div>
+            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
+            <span class="col-name">Modal/</span>
+            <span class="col-chevron">›</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Col 3: Button/ -->
+      <div class="col-panel">
+        <div class="col-head">BUTTON/</div>
+        <div class="col-body">
+          <div class="col-item active" onclick="selColFile(this,'ButtonGroup.tsx','tsx','3.2 KB','2026-06-06')">
+            <div class="heat h9"></div>
+            <span class="col-icon ico-file-tsx"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
+            <span class="col-name">ButtonGroup.tsx</span>
+          </div>
+          <div class="col-item" onclick="selColFile(this,'Button.tsx','tsx','2.4 KB','2026-06-08')">
+            <div class="heat h9"></div>
+            <span class="col-icon ico-file-tsx"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
+            <span class="col-name">Button.tsx</span>
+          </div>
+          <div class="col-item" onclick="selColFile(this,'ButtonIcon.tsx','tsx','1.3 KB','2026-06-03')">
+            <div class="heat h8"></div>
+            <span class="col-icon ico-file-tsx"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
+            <span class="col-name">ButtonIcon.tsx</span>
+          </div>
+          <div class="col-item" onclick="selColFile(this,'index.ts','ts','0.2 KB','2026-06-08')">
+            <div class="heat h4"></div>
+            <span class="col-icon ico-file-ts"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
+            <span class="col-name">index.ts</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Col 4: detail card -->
+      <div class="col-panel detail-card">
+        <div class="col-head" id="detailCardHead">ButtonGroup.tsx</div>
+        <div class="col-body">
+          <div class="detail-filename" id="detailCardName">ButtonGroup.tsx</div>
+          <div class="detail-table">
+            <div class="detail-row">
+              <span class="detail-key">形式</span>
+              <span class="detail-val" id="detailCardExt">tsx</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-key">サイズ</span>
+              <span class="detail-val" id="detailCardSize">3.2 KB</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-key">更新日</span>
+              <span class="detail-val" id="detailCardDate">2026-06-06</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<!-- Statusbar -->
+<div class="statusbar">
+  <span class="status-dot"></span>
+  <span class="status-text">10件 · 0.14s</span>
+</div>
+
+<script>
+  /* ── Row selection ── */
+  function selRow(el) {
+    document.querySelectorAll('.file-row').forEach(r => r.classList.remove('selected'));
+    el.classList.add('selected');
+  }
+
+  /* ── Column file selection ── */
+  function selColFile(el, name, ext, size, date) {
+    el.closest('.col-panel').querySelectorAll('.col-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('detailCardHead').textContent = name;
+    document.getElementById('detailCardName').textContent = name;
+    document.getElementById('detailCardExt').textContent  = ext;
+    document.getElementById('detailCardSize').textContent = size;
+    document.getElementById('detailCardDate').textContent = date;
+  }
+
+  /* ── Pane resizer (left / right split) ── */
+  const paneResizer = document.getElementById('resizer');
+  const leftPane    = document.getElementById('leftPane');
+  let paneResizing  = false, paneStartX, paneStartW;
+
+  paneResizer.addEventListener('mousedown', e => {
+    paneResizing = true;
+    paneStartX   = e.clientX;
+    paneStartW   = leftPane.getBoundingClientRect().width;
+    paneResizer.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  /* ── Column widths ── */
+  const colWidths = { folder: 150, size: 60, date: 86 };
+
+  function applyColWidths() {
+    document.querySelectorAll('.rc-folder').forEach(el => el.style.width = colWidths.folder + 'px');
+    document.querySelectorAll('.rc-size').forEach(el => el.style.width = colWidths.size + 'px');
+    document.querySelectorAll('.rc-date').forEach(el => el.style.width = colWidths.date + 'px');
+    document.getElementById('col-h-folder').style.width = colWidths.folder + 'px';
+    document.getElementById('col-h-size').style.width   = colWidths.size + 'px';
+    document.getElementById('col-h-date').style.width   = colWidths.date + 'px';
+  }
+  applyColWidths();
+
+  /* ── Column resizers ── */
+  let colResizing = null, colStartX, colStartW;
+
+  document.querySelectorAll('.col-resizer').forEach(r => {
+    r.addEventListener('mousedown', e => {
+      e.stopPropagation();
+      colResizing = r.dataset.resizer;
+      colStartX   = e.clientX;
+      colStartW   = colWidths[colResizing];
+      r.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+  });
+
+  /* ── Sort ── */
+  let sortCol = 'name', sortAsc = true;
+
+  function sortBy(col) {
+    if (sortCol === col) { sortAsc = !sortAsc; }
+    else { sortCol = col; sortAsc = true; }
+    updateSortIndicators();
+
+    const list = document.querySelector('.file-list');
+    const rows = [...list.querySelectorAll('.file-row')];
+    rows.sort((a, b) => {
+      let va, vb;
+      if (col === 'name')   { va = a.querySelector('.file-text').textContent; vb = b.querySelector('.file-text').textContent; }
+      if (col === 'folder') { va = a.querySelector('.folder-col').textContent; vb = b.querySelector('.folder-col').textContent; }
+      if (col === 'size')   { va = parseFloat(a.querySelector('.size-col').textContent); vb = parseFloat(b.querySelector('.size-col').textContent); }
+      if (col === 'date')   { va = a.querySelector('.date-col').textContent; vb = b.querySelector('.date-col').textContent; }
+      if (va < vb) return sortAsc ? -1 : 1;
+      if (va > vb) return sortAsc ? 1 : -1;
+      return 0;
+    });
+    rows.forEach(r => list.appendChild(r));
+  }
+
+  function updateSortIndicators() {
+    const colMap = { name: null, folder: 'col-h-folder', size: 'col-h-size', date: 'col-h-date' };
+    document.querySelectorAll('.col-h').forEach(h => {
+      h.classList.remove('sorted');
+      const arrow = h.querySelector('.sort-arrow');
+      if (arrow) arrow.textContent = '';
+    });
+    // 名前列は col-h-name クラスで特定
+    const nameH = document.querySelector('.col-h-name');
+    const targetH = sortCol === 'name' ? nameH : document.getElementById(colMap[sortCol]);
+    if (targetH) {
+      targetH.classList.add('sorted');
+      let arrow = targetH.querySelector('.sort-arrow');
+      if (!arrow) { arrow = document.createElement('span'); arrow.className = 'sort-arrow'; targetH.appendChild(arrow); }
+      arrow.textContent = sortAsc ? '↑' : '↓';
+    }
+  }
+
+  /* ── Menu hamburger ── */
+  const titlebarMenu   = document.getElementById('titlebarMenu');
+  const menuHamburger  = document.getElementById('menuHamburger');
+  const menuDropdown   = document.getElementById('menuDropdown');
+
+  function toggleMenuDropdown() {
+    menuDropdown.classList.toggle('open');
+  }
+
+  // 外クリックで閉じる
+  document.addEventListener('click', e => {
+    if (!menuHamburger.contains(e.target) && !menuDropdown.contains(e.target)) {
+      menuDropdown.classList.remove('open');
+    }
+  });
+
+  // メニューが収まるか監視
+  const menuObserver = new ResizeObserver(() => checkMenuOverflow());
+  menuObserver.observe(document.querySelector('.titlebar'));
+
+  function checkMenuOverflow() {
+    const titlebar      = document.querySelector('.titlebar');
+    const logo          = document.querySelector('.titlebar-logo');
+    const searchCenter  = document.querySelector('.titlebar-search-center');
+    const winctrls      = document.querySelector('.titlebar-winctrls');
+    const titlebarW     = titlebar.getBoundingClientRect().width;
+
+    // logo + hamburger + search + winctrls の最小幅を確保した上での余裕
+    const logoW     = logo.getBoundingClientRect().width;
+    const winctrlW  = winctrls.getBoundingClientRect().width;
+    const searchW   = searchCenter.getBoundingClientRect().width;
+    const available = titlebarW - logoW - winctrlW - searchW - 32; // 余白
+
+    // メニューの全幅を計算
+    const menuBtns   = titlebarMenu.querySelectorAll('.menu-btn');
+    let   totalMenuW = 0;
+    menuBtns.forEach(b => { totalMenuW += b.getBoundingClientRect().width || 80; });
+
+    if (totalMenuW > available) {
+      titlebarMenu.style.display   = 'none';
+      menuHamburger.style.display  = 'flex';
+    } else {
+      titlebarMenu.style.display   = 'flex';
+      menuHamburger.style.display  = 'none';
+      menuDropdown.classList.remove('open');
+    }
+  }
+
+  checkMenuOverflow();
+
+  /* ── Unified mousemove / mouseup ── */
+  document.addEventListener('mousemove', e => {
+    if (paneResizing) {
+      const dx  = e.clientX - paneStartX;
+      const min = 200, max = window.innerWidth - 280;
+      const nw  = Math.min(Math.max(paneStartW + dx, min), max);
+      leftPane.style.width = nw + 'px';
+      document.documentElement.style.setProperty('--left-w', nw + 'px');
+    }
+    if (colResizing) {
+      const dx  = e.clientX - colStartX;
+      const min = { folder: 80, size: 40, date: 60 }[colResizing];
+      colWidths[colResizing] = Math.max(colStartW + dx, min);
+      applyColWidths();
+    }
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (paneResizing) {
+      paneResizing = false;
+      paneResizer.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+    if (colResizing) {
+      document.querySelectorAll('.col-resizer').forEach(r => r.classList.remove('dragging'));
+      colResizing = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+</script>
+</body>
+</html>
