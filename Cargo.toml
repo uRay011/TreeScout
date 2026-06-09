@@ -4,5 +4,6 @@ members = [
     "crates/search",
     "crates/nlp",
     "crates/embedding",
+    "crates/astar",
 ]
 resolver = "2"
