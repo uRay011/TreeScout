@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { SearchBar } from "./components/SearchBar/SearchBar";
 import { ResultList } from "./components/SearchBar/ResultList";
-import { searchFiles, SearchResult } from "./lib/tauri";
+import { semanticSearch, SearchResult } from "./lib/tauri";
 import "./App.css";
 
 // ── ロゴSVG ──────────────────────────────────────
@@ -57,12 +57,16 @@ export default function App() {
     setIsLoading(true);
     const t0 = performance.now();
     try {
-      const items = await searchFiles(query);
-      // size/modified は現状 Everything から取れないためデフォルト値を補完
-      const normalized = items.map(r => ({
-        ...r,
-        size: r.size ?? 0,
-        modified: r.modified ?? "",
+      const items = await semanticSearch(query);
+      // SemanticResult → SearchResult（ResultList 互換）に変換
+      const normalized: SearchResult[] = items.map(r => ({
+        name: r.name,
+        path: r.path,
+        folder: r.path.replace(/[\\/][^\\/]+$/, "") || r.path,
+        is_dir: false,
+        ext: r.ext,
+        size: 0,
+        modified: "",
       }));
       setResults(normalized);
       setElapsed((performance.now() - t0) / 1000);
