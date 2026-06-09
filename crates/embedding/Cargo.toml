@@ -1,0 +1,20 @@
+[package]
+name = "embedding"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["static"]
+# 静的埋め込み（model2vec-rs）：デフォルト有効・ONNX不要
+static = ["dep:model2vec-rs"]
+# e5-small INT8 フォールバック：Precision@K が不足時のみ有効化
+fastembed = ["dep:fastembed"]
+
+[dependencies]
+model2vec-rs = { version = "0.2", default-features = false, features = ["onig", "local-only"], optional = true }
+fastembed = { version = "4", optional = true }
+anyhow = "1"
+thiserror = "2"
+
+[dev-dependencies]
+approx = "0.5"
