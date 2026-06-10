@@ -453,12 +453,80 @@ body {
 }
 .col-body { overflow-y: auto; flex: 1; }
 
+/* ヒートマップアイテム（探索カラムの1行） */
+.col-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 10px;
+  border: none;
+  background: none;
+  color: var(--text2);
+  font: 400 11px var(--font);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.col-item:hover  { background: var(--bg3); color: var(--text); }
+.col-item.active { background: var(--sel-bg); color: var(--text); }
+.col-item.skip   { cursor: default; }
+
+/* ヒートマップ背景オーバーレイ（スコア→輝度、design.md §3.5） */
+.col-item .heat-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--heat-bg, transparent);
+  opacity: calc(var(--heat-opacity, 0) * 0.18);
+  pointer-events: none;
+}
+
+/* アクティブ行の左端パスライン */
+.col-item .col-active-line {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  transform-origin: top;
+}
+
+.col-icon  { display: flex; align-items: center; }
+.col-name  {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  z-index: 1;
+}
+.col-chevron {
+  color: var(--text3);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.col-score {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--heat-text, var(--text3));
+  font-variant-numeric: tabular-nums;
+}
+
 .detail-card .col-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .detail-filename { font-size: 13px; font-weight: 600; color: var(--text); word-break: break-all; }
 .detail-table    { display: flex; flex-direction: column; gap: 5px; }
 .detail-row      { display: flex; gap: 8px; align-items: baseline; }
 .detail-key      { width: 44px; font-size: 10px; color: var(--text3); flex-shrink: 0; }
 .detail-val      { font-size: 11px; color: var(--text2); }
+
+/* AIガイドパスライン: 高スコアファイル選択時に光る下線（design.md §3.5） */
+.guide-path-glow {
+  height: 2px;
+  border-radius: 1px;
+  margin-top: 4px;
+  background: linear-gradient(90deg, var(--accent), #58a6ff, var(--accent));
+  box-shadow: 0 0 6px 1px var(--accent);
+  transform-origin: left;
+}
 
 /* ══════════════════════════════════════════════════
    STATUS BAR

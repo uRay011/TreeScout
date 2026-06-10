@@ -1,7 +1,15 @@
 import { useState, useCallback, useRef } from "react";
 import { SearchBar } from "./components/SearchBar/SearchBar";
 import { ResultList } from "./components/SearchBar/ResultList";
-import { semanticSearch, SearchResult } from "./lib/tauri";
+import { ColumnView } from "./components/ColumnView/ColumnView";
+import {
+  semanticSearch,
+  SearchResult,
+  ExploreEvent,
+  AstarColumn,
+  AstarEntry,
+  buildColumnsFromEvents,
+} from "./lib/tauri";
 import "./App.css";
 
 // ── ロゴSVG ──────────────────────────────────────
@@ -48,6 +56,11 @@ export default function App() {
   const [elapsed,       setElapsed]       = useState(0);
   const [menuOpen,      setMenuOpen]      = useState(false);
 
+  // Phase 4: A*探索カラムUI
+  const [columns,      setColumns]      = useState<AstarColumn[]>([]);
+  const [selectedFile, setSelectedFile] = useState<AstarEntry | null>(null);
+  const exploreEventsRef = useRef<ExploreEvent[]>([]);
+
   // ペイン分割リサイズ
   const leftPaneRef  = useRef<HTMLDivElement>(null);
   const resizerRef   = useRef<HTMLDivElement>(null);
@@ -55,9 +68,17 @@ export default function App() {
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return;
     setIsLoading(true);
+    setColumns([]);
+    setSelectedFile(null);
+    exploreEventsRef.current = [];
     const t0 = performance.now();
     try {
-      const items = await semanticSearch(query);
+      const items = await semanticSearch(query, {
+        onExplore: (ev) => {
+          exploreEventsRef.current.push(ev);
+          setColumns(buildColumnsFromEvents(exploreEventsRef.current));
+        },
+      });
       // SemanticResult → SearchResult（ResultList 互換）に変換
       const normalized: SearchResult[] = items.map(r => ({
         name: r.name,
@@ -77,6 +98,14 @@ export default function App() {
       setIsLoading(false);
     }
   }, [query]);
+
+  // カラムUI: エントリ選択 → アクティブ化 + 詳細カード表示
+  const handleColumnEntrySelect = useCallback((colIndex: number, entry: AstarEntry) => {
+    setColumns(cols =>
+      cols.map((col, i) => (i === colIndex ? { ...col, activeEntryPath: entry.path } : col))
+    );
+    setSelectedFile(entry.kind === "found" ? entry : null);
+  }, []);
 
   // ── キーボードナビゲーション ──
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -109,8 +138,6 @@ export default function App() {
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   };
-
-  const selectedResult = results[selectedIndex] ?? null;
 
   return (
     <div className="app-root" onKeyDown={handleKeyDown}>
@@ -195,46 +222,12 @@ export default function App() {
             <button className="btn-primary" type="button">適用</button>
           </div>
 
-          {/* カラムエクスプローラー（Phase4実装予定） */}
-          <div className="columns-scroll">
-            <div className="col-panel phase4-placeholder">
-              <div className="col-head">Phase 4 実装予定</div>
-              <div className="col-body" style={{ padding: "16px", color: "var(--text2)", fontSize: "11px", lineHeight: "1.6" }}>
-                探索型カラム UI・ヒートマップ・<br/>AIガイドパスラインは<br/>Phase 4 で実装します。
-              </div>
-            </div>
-            {/* 詳細カード */}
-            {selectedResult && (
-              <div className="col-panel detail-card">
-                <div className="col-head">{selectedResult.name}</div>
-                <div className="col-body">
-                  <div className="detail-filename">{selectedResult.name}</div>
-                  <div className="detail-table">
-                    <div className="detail-row">
-                      <span className="detail-key">形式</span>
-                      <span className="detail-val">{selectedResult.ext}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-key">サイズ</span>
-                      <span className="detail-val">
-                        {selectedResult.size < 1024
-                          ? `${selectedResult.size} B`
-                          : `${(selectedResult.size / 1024).toFixed(1)} KB`}
-                      </span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-key">更新日</span>
-                      <span className="detail-val">{selectedResult.modified}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-key">パス</span>
-                      <span className="detail-val" style={{ wordBreak: "break-all" }}>{selectedResult.path}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          {/* 探索型カラムUI: A*探索ログをリアルタイム展開（design.md §3.3） */}
+          <ColumnView
+            columns={columns}
+            onEntrySelect={handleColumnEntrySelect}
+            selectedFile={selectedFile}
+          />
         </div>
       </main>
 
