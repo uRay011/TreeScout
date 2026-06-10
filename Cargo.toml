@@ -6,5 +6,6 @@ members = [
     "crates/embedding",
     "crates/astar",
     "crates/pipeline",
+    "crates/index",
 ]
 resolver = "2"
