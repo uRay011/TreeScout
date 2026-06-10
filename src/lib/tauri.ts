@@ -16,6 +16,20 @@ export async function searchFiles(query: string, max = 200): Promise<SearchResul
   return invoke<SearchResult[]>("search_files", { query, max });
 }
 
+// Phase 4: フォルダembedding事前インデックス
+export interface FolderIndexResult {
+  updated: number;
+  skipped: number;
+  scanned: number;
+  removed: number;
+  matrix_len: number;
+}
+
+/** `root` 配下のフォルダ embedding を差分更新し、mmap行列を再構築する */
+export async function indexFolders(root: string): Promise<FolderIndexResult> {
+  return invoke<FolderIndexResult>("index_folders_command", { root });
+}
+
 // Phase 2: セマンティック検索
 export interface SemanticResult {
   path: string;
@@ -126,6 +140,8 @@ export interface SemanticSearchOptions {
   mu?: number;
   /** 探索ログを受け取るコールバック。省略すると無効 */
   onExplore?: (event: ExploreEvent) => void;
+  /** 探索のルートフォルダ（Everything の path: フィルタに渡す） */
+  rootPath?: string;
 }
 
 /**
@@ -136,7 +152,7 @@ export async function semanticSearch(
   query: string,
   options: SemanticSearchOptions = {},
 ): Promise<SemanticResult[]> {
-  const { topK, lambda, mu, onExplore } = options;
+  const { topK, lambda, mu, onExplore, rootPath } = options;
 
   let unlisten: UnlistenFn | undefined;
   const channel = onExplore ? `treescout://explore/${Date.now()}` : undefined;
@@ -152,6 +168,7 @@ export async function semanticSearch(
       lambda: lambda ?? null,
       mu: mu ?? null,
       exploreChannel: channel ?? null,
+      rootPath: rootPath || null,
     });
   } finally {
     unlisten?.();

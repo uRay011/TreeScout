@@ -1,15 +1,29 @@
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use astar::{AstarConfig, ExploreCallback};
 use nlp::parse_query;
 use pipeline::run_with_paths;
-use search::SearchResult as EvResult;
+use search::{SearchError, SearchResult as EvResult};
+
+mod folder_index;
+use folder_index::{index_folders_command, FolderIndexState};
 
 // ── Phase 1 既存コマンド（後方互換） ────────────────────────
 #[tauri::command]
 fn search_files(query: String, max: Option<u32>) -> Result<Vec<EvResult>, String> {
     search::search(&query, max.unwrap_or(200)).map_err(|e| e.to_string())
+}
+
+// ── Phase 4: ファイルプレビュー ──────────────────────────────
+//
+// 検索パイプラインとは独立した経路。アイテム選択時にのみ呼ばれるため
+// Everything絞り込み/A*探索の <200ms 目標には影響しない。
+#[tauri::command]
+async fn get_preview(path: String) -> Result<preview::PreviewResult, String> {
+    preview::get_preview(std::path::Path::new(&path))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ── Phase 2: 2フェーズセマンティック検索 ─────────────────────
@@ -83,9 +97,15 @@ fn semantic_search(
     lambda: Option<f32>,
     mu: Option<f32>,
     explore_channel: Option<String>,
+    root_path: Option<String>,
 ) -> Result<Vec<SemanticResult>, String> {
     let parsed = parse_query(&query);
     let everything_query = parsed.to_everything_query();
+    let everything_query = match root_path.filter(|r| !r.is_empty()) {
+        Some(root) if everything_query.is_empty() => format!("path:\"{}\"", root),
+        Some(root) => format!("path:\"{}\" {}", root, everything_query),
+        None => everything_query,
+    };
 
     // Everything 絞り込み（非 Windows は空リストを返すスタブ）
     let paths = fetch_candidates(&everything_query, 1000).map_err(|e| e.to_string())?;
@@ -209,7 +229,18 @@ fn fetch_candidates(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![search_files, semantic_search])
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let state = FolderIndexState::init(app.handle()).map_err(std::io::Error::other)?;
+            app.manage(state);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            search_files,
+            semantic_search,
+            get_preview,
+            index_folders_command
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
