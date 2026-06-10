@@ -121,7 +121,7 @@ where
 
     #[cfg(windows)]
     fn fetch_candidates(&self, query: &str) -> Result<Vec<PathBuf>, PipelineError> {
-        use search::{search as ev_search, SearchError};
+        use search::search as ev_search;
 
         let results = ev_search(query, self.config.everything_max)
             .map_err(PipelineError::Everything)?;
