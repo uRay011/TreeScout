@@ -7,6 +7,8 @@ edition = "2021"
 rusqlite = { version = "0.32", features = ["bundled"] }
 memmap2 = "0.9"
 thiserror = "2"
+walkdir = "2"
+embedding = { path = "../embedding", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

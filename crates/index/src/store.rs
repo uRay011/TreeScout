@@ -99,17 +99,64 @@ impl IndexStore {
         Ok(())
     }
 
-    /// フォルダの int8 量子化埋め込みを upsert する。
+    /// フォルダの int8 量子化埋め込みを upsert する（`mtime` なし、後方互換用）。
     pub fn upsert_folder_embedding(
         &self,
         path: &str,
         embedding: &[i8],
     ) -> Result<(), IndexError> {
         self.conn.execute(
-            "INSERT INTO folders (path, folder_embedding) VALUES (?1, ?2)
+            "INSERT INTO folders (path, folder_embedding, mtime) VALUES (?1, ?2, NULL)
              ON CONFLICT(path) DO UPDATE SET folder_embedding = excluded.folder_embedding",
             params![path, i8_to_bytes(embedding)],
         )?;
+        Ok(())
+    }
+
+    /// フォルダの int8 量子化埋め込みを `mtime` 付きで upsert する。
+    ///
+    /// `mtime` はディレクトリの更新時刻（UNIX秒）。次回インデックス時に
+    /// [`IndexStore::folder_mtime`] と比較して再計算をスキップする判定に使う。
+    pub fn upsert_folder_embedding_with_mtime(
+        &self,
+        path: &str,
+        embedding: &[i8],
+        mtime: i64,
+    ) -> Result<(), IndexError> {
+        self.conn.execute(
+            "INSERT INTO folders (path, folder_embedding, mtime) VALUES (?1, ?2, ?3)
+             ON CONFLICT(path) DO UPDATE SET
+                folder_embedding = excluded.folder_embedding,
+                mtime = excluded.mtime",
+            params![path, i8_to_bytes(embedding), mtime],
+        )?;
+        Ok(())
+    }
+
+    /// 登録済みフォルダの `mtime` を取得する（未登録なら `None`）。
+    pub fn folder_mtime(&self, path: &str) -> Result<Option<i64>, IndexError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT mtime FROM folders WHERE path = ?1",
+                params![path],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    /// インデックス済みフォルダパスの集合を取得する（USN差分での削除検知用）。
+    pub fn all_folder_paths(&self) -> Result<std::collections::HashSet<String>, IndexError> {
+        let mut stmt = self.conn.prepare("SELECT path FROM folders")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|r| r.map_err(IndexError::from)).collect()
+    }
+
+    /// パスをキーにフォルダ行を削除する（消滅したディレクトリの反映用）。
+    pub fn remove_folder(&self, path: &str) -> Result<(), IndexError> {
+        self.conn
+            .execute("DELETE FROM folders WHERE path = ?1", params![path])?;
         Ok(())
     }
 

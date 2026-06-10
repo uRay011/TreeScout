@@ -19,7 +19,8 @@ pub fn init_schema(conn: &Connection) -> Result<(), IndexError> {
 
         CREATE TABLE IF NOT EXISTS folders (
             path              TEXT PRIMARY KEY,
-            folder_embedding  BLOB
+            folder_embedding  BLOB,
+            mtime             INTEGER
         );
         ",
     )?;
