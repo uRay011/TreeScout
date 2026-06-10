@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useLayoutEffect } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { SearchBar } from "./components/SearchBar/SearchBar";
 import { ResultList } from "./components/SearchBar/ResultList";
 import { ColumnView } from "./components/ColumnView/ColumnView";
@@ -55,11 +56,20 @@ export default function App() {
   const [isLoading,     setIsLoading]     = useState(false);
   const [elapsed,       setElapsed]       = useState(0);
   const [menuOpen,      setMenuOpen]      = useState(false);
+  // メニューバーと検索ボックスが重なる前にハンバーガーへ切り替え
+  const [menuCollapsed, setMenuCollapsed] = useState(false);
+  const titlebarRef = useRef<HTMLElement>(null);
+  const menuRef     = useRef<HTMLElement>(null);
+  const searchRef   = useRef<HTMLDivElement>(null);
 
   // Phase 4: A*探索カラムUI
   const [columns,      setColumns]      = useState<AstarColumn[]>([]);
   const [selectedFile, setSelectedFile] = useState<AstarEntry | null>(null);
   const exploreEventsRef = useRef<ExploreEvent[]>([]);
+
+  // ルートフォルダ（探索範囲の絞り込み）
+  const [rootInput, setRootInput] = useState("");
+  const [rootPath,  setRootPath]  = useState("");
 
   // ペイン分割リサイズ
   const leftPaneRef  = useRef<HTMLDivElement>(null);
@@ -74,6 +84,7 @@ export default function App() {
     const t0 = performance.now();
     try {
       const items = await semanticSearch(query, {
+        rootPath,
         onExplore: (ev) => {
           exploreEventsRef.current.push(ev);
           setColumns(buildColumnsFromEvents(exploreEventsRef.current));
@@ -97,7 +108,21 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [query]);
+  }, [query, rootPath]);
+
+  // ルートフォルダ選択ダイアログ
+  const handleBrowseRoot = useCallback(async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected === "string") {
+      setRootInput(selected);
+      setRootPath(selected);
+    }
+  }, []);
+
+  // ルートフォルダ入力を確定
+  const handleApplyRoot = useCallback(() => {
+    setRootPath(rootInput.trim());
+  }, [rootInput]);
 
   // カラムUI: エントリ選択 → アクティブ化 + 詳細カード表示
   const handleColumnEntrySelect = useCallback((colIndex: number, entry: AstarEntry) => {
@@ -117,6 +142,40 @@ export default function App() {
       setSelectedIndex(i => Math.max(i - 1, 0));
     }
   }, [results.length]);
+
+  // ── メニューバー/検索ボックスの重なり検知 ──
+  // メニュー項目は固定なので、表示中に一度だけ自然幅を計測してキャッシュする
+  const menuNaturalWidthRef = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    const titlebarEl = titlebarRef.current;
+    const searchEl   = searchRef.current;
+    if (!titlebarEl || !searchEl) return;
+
+    const MARGIN = 16; // メニューと検索ボックスの間に最低限確保する余白(px)
+
+    const check = () => {
+      const menuEl = menuRef.current;
+      if (menuEl && !menuEl.hidden) {
+        menuNaturalWidthRef.current = menuEl.getBoundingClientRect().width;
+      }
+      const menuWidth = menuNaturalWidthRef.current;
+      if (menuWidth == null) return;
+
+      const logoWidth = titlebarEl.querySelector(".titlebar-logo")?.getBoundingClientRect().width ?? 0;
+      const menuLeft  = (titlebarEl.querySelector(".titlebar-logo")?.getBoundingClientRect().right ?? logoWidth);
+      const menuRight = menuLeft + menuWidth;
+      const searchLeft = searchEl.getBoundingClientRect().left;
+
+      setMenuCollapsed(menuRight + MARGIN > searchLeft);
+    };
+
+    const ro = new ResizeObserver(check);
+    ro.observe(titlebarEl);
+    check();
+
+    return () => ro.disconnect();
+  }, []);
 
   // ── ペイン分割リサイズ ──
   const onResizerMouseDown = (e: React.MouseEvent) => {
@@ -142,30 +201,38 @@ export default function App() {
   return (
     <div className="app-root" onKeyDown={handleKeyDown}>
       {/* ══ TITLEBAR ══ */}
-      <header className="titlebar" role="banner">
+      <header className="titlebar" role="banner" ref={titlebarRef}>
         <div className="titlebar-logo" aria-label="TreeScout">
           <LogoMark />
           <span className="logo-name">TreeScout</span>
         </div>
 
-        <nav className="titlebar-menu" aria-label="メインメニュー" id="titlebarMenu">
+        <nav
+          className="titlebar-menu"
+          aria-label="メインメニュー"
+          id="titlebarMenu"
+          ref={menuRef}
+          hidden={menuCollapsed}
+        >
           {MENU_ITEMS.map(item => (
             <button key={item} className="menu-btn" type="button">{item}</button>
           ))}
         </nav>
 
         {/* ハンバーガー（幅不足時） */}
-        <button
-          className="menu-hamburger"
-          type="button"
-          aria-label="メニューを開く"
-          aria-expanded={menuOpen}
-          aria-controls="menuDropdown"
-          onClick={() => setMenuOpen(v => !v)}
-        >
-          <span/><span/><span/>
-        </button>
-        {menuOpen && (
+        {menuCollapsed && (
+          <button
+            className="menu-hamburger"
+            type="button"
+            aria-label="メニューを開く"
+            aria-expanded={menuOpen}
+            aria-controls="menuDropdown"
+            onClick={() => setMenuOpen(v => !v)}
+          >
+            <span/><span/><span/>
+          </button>
+        )}
+        {menuCollapsed && menuOpen && (
           <div className="menu-dropdown open" id="menuDropdown" role="menu">
             {MENU_ITEMS.map(item => (
               <button key={item} className="menu-btn" role="menuitem" type="button">{item}</button>
@@ -174,7 +241,7 @@ export default function App() {
         )}
 
         {/* 検索（タイトルバー中央） */}
-        <div className="titlebar-search-center">
+        <div className="titlebar-search-center" ref={searchRef}>
           <SearchBar
             value={query}
             onChange={setQuery}
@@ -214,12 +281,16 @@ export default function App() {
             <span className="path-label">ルート</span>
             <input
               className="path-input"
-              defaultValue=""
+              value={rootInput}
+              onChange={(e) => setRootInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleApplyRoot();
+              }}
+              placeholder="未指定（全体検索）"
               aria-label="ルートパス"
-              readOnly
             />
-            <button className="btn-sm" type="button">参照</button>
-            <button className="btn-primary" type="button">適用</button>
+            <button className="btn-sm" type="button" onClick={handleBrowseRoot}>参照</button>
+            <button className="btn-primary" type="button" onClick={handleApplyRoot}>適用</button>
           </div>
 
           {/* 探索型カラムUI: A*探索ログをリアルタイム展開（design.md §3.3） */}

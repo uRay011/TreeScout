@@ -83,6 +83,7 @@ body {
   flex-shrink: 0;
   -webkit-app-region: no-drag;
 }
+.titlebar-menu[hidden] { display: none; }
 .menu-btn {
   background: none;
   border: none;
@@ -99,7 +100,7 @@ body {
 
 /* ハンバーガー */
 .menu-hamburger {
-  display: none;
+  display: flex;
   background: none;
   border: none;
   color: var(--text2);
