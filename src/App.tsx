@@ -1,5 +1,6 @@
-import { useState, useCallback, useRef, useLayoutEffect } from "react";
+import { useState, useCallback, useEffect, useRef, useLayoutEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SearchBar } from "./components/SearchBar/SearchBar";
 import { ResultList } from "./components/SearchBar/ResultList";
 import { ColumnView } from "./components/ColumnView/ColumnView";
@@ -29,15 +30,16 @@ function LogoMark() {
 
 // ── ウィンドウコントロール ────────────────────────
 function WindowControls() {
+  const appWindow = getCurrentWindow();
   return (
     <div className="titlebar-winctrls" aria-label="ウィンドウ操作">
-      <button className="winctrl" title="最小化" aria-label="最小化" type="button">
+      <button className="winctrl" title="最小化" aria-label="最小化" type="button" onClick={() => appWindow.minimize()}>
         <svg width="10" height="1" viewBox="0 0 10 1" aria-hidden><rect width="10" height="1" fill="currentColor"/></svg>
       </button>
-      <button className="winctrl" title="最大化" aria-label="最大化" type="button">
+      <button className="winctrl" title="最大化" aria-label="最大化" type="button" onClick={() => appWindow.toggleMaximize()}>
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden><rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" fill="none"/></svg>
       </button>
-      <button className="winctrl close" title="閉じる" aria-label="閉じる" type="button">
+      <button className="winctrl close" title="閉じる" aria-label="閉じる" type="button" onClick={() => appWindow.close()}>
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
           <line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
           <line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
@@ -76,7 +78,7 @@ export default function App() {
   const resizerRef   = useRef<HTMLDivElement>(null);
 
   const handleSearch = useCallback(async () => {
-    if (!query.trim()) return;
+    if (!query.trim() && !rootPath) return;
     setIsLoading(true);
     setColumns([]);
     setSelectedFile(null);
@@ -123,6 +125,14 @@ export default function App() {
   const handleApplyRoot = useCallback(() => {
     setRootPath(rootInput.trim());
   }, [rootInput]);
+
+  // ルートフォルダ確定後、即座に一覧を取得する
+  useEffect(() => {
+    if (rootPath) {
+      handleSearch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootPath]);
 
   // カラムUI: エントリ選択 → アクティブ化 + 詳細カード表示
   const handleColumnEntrySelect = useCallback((colIndex: number, entry: AstarEntry) => {
@@ -201,7 +211,12 @@ export default function App() {
   return (
     <div className="app-root" onKeyDown={handleKeyDown}>
       {/* ══ TITLEBAR ══ */}
-      <header className="titlebar" role="banner" ref={titlebarRef}>
+      <header
+        className="titlebar"
+        role="banner"
+        ref={titlebarRef}
+        onDoubleClick={() => getCurrentWindow().toggleMaximize()}
+      >
         <div className="titlebar-logo" aria-label="TreeScout">
           <LogoMark />
           <span className="logo-name">TreeScout</span>

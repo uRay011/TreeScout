@@ -15,7 +15,8 @@
         "title": "TreeScout",
         "width": 900,
         "height": 640,
-        "devtools": true
+        "devtools": true,
+        "decorations": false
       }
     ],
     "security": {
