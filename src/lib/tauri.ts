@@ -84,14 +84,23 @@ function pathDepth(path: string): number {
  * ExploreEvent の系列から探索型カラムUI用の AstarColumn[] を構築する。
  * パスの深さをカラムインデックスとして割り当て、open_dir/skip_dir はそのフォルダ自身を
  * 親カラムのエントリとして、found_file は最も深いカラムへ確定エントリとして追加する。
+ *
+ * rootPath 指定時は一番左のカラムをルートフォルダ自身に固定し、
+ * ルートより上位階層のフォルダ（祖先ディレクトリ）のイベントは非表示にする。
  */
-export function buildColumnsFromEvents(events: ExploreEvent[]): AstarColumn[] {
+export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string): AstarColumn[] {
   const columns: AstarColumn[] = [];
   let baseDepth: number | null = null;
 
-  const ensureColumn = (depth: number, label: string): AstarColumn => {
+  if (rootPath) {
+    baseDepth = pathDepth(rootPath);
+    columns.push({ id: "col-0", label: basename(rootPath) || rootPath, entries: [], activeEntryPath: null });
+  }
+
+  const ensureColumn = (depth: number, label: string): AstarColumn | null => {
     if (baseDepth === null) baseDepth = depth;
     const idx = depth - baseDepth;
+    if (idx < 0) return null; // ルートより上位階層は非表示
     while (columns.length <= idx) {
       columns.push({ id: `col-${columns.length}`, label: "", entries: [], activeEntryPath: null });
     }
@@ -105,6 +114,7 @@ export function buildColumnsFromEvents(events: ExploreEvent[]): AstarColumn[] {
       case "skip_dir": {
         const depth = pathDepth(ev.path);
         const col = ensureColumn(depth, basename(ev.path) || ev.path);
+        if (!col) break;
         col.entries.push({
           path: ev.path,
           name: basename(ev.path),
@@ -119,6 +129,7 @@ export function buildColumnsFromEvents(events: ExploreEvent[]): AstarColumn[] {
         const depth = pathDepth(ev.path);
         const parentLabel = basename(ev.path).replace(/[\\/][^\\/]+$/, "") || "結果";
         const col = ensureColumn(depth, parentLabel);
+        if (!col) break;
         col.entries.push({
           path: ev.path,
           name: basename(ev.path),

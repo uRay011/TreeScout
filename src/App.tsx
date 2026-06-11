@@ -8,6 +8,7 @@ import { ViewModePopup, ViewMode } from "./components/SearchBar/ViewModePopup";
 import { ColumnView } from "./components/ColumnView/ColumnView";
 import { PreviewPane, PreviewSelection } from "./components/Preview/PreviewPane";
 import {
+  searchFiles,
   semanticSearch,
   SearchResult,
   ExploreEvent,
@@ -124,6 +125,9 @@ export default function App() {
   // 選択中ファイルのスコア（最終カラムのAIガイドパスライン点灯判定に使用。score >= 0.8）
   const [guideScore, setGuideScore] = useState<number | null>(null);
   const exploreEventsRef = useRef<ExploreEvent[]>([]);
+  // StrictModeの二重マウント等でhandleSearchが多重起動した際、古い実行のイベントが
+  // 後勝ちのカラムに混ざって二重表示されるのを防ぐための実行世代カウンタ
+  const searchSeqRef = useRef(0);
 
   // Phase 4: プレビューペイン
   const [previewTarget,    setPreviewTarget]    = useState<PreviewSelection | null>(null);
@@ -155,24 +159,53 @@ export default function App() {
   useEffect(() => () => stopElapsedTimer(), [stopElapsedTimer]);
 
   const handleSearch = useCallback(async () => {
+    const seq = ++searchSeqRef.current;
     setIsLoading(true);
     setColumns([]);
     setGuideScore(null);
     setPreviewTarget(null);
     exploreEventsRef.current = [];
-    setPhase("Phase 1: Everything 絞り込み…");
     setLogEntry(null);
+    setCounts(null);
+    const t0 = performance.now();
+    startElapsedTimer(t0);
+
+    // 空クエリ（フィルタなし）時はA*探索をバイパスし、Everythingの結果をそのまま表示する。
+    // ただしルート指定時は配下一覧をカラムUIに表示する起点となるためA*探索を実行する
+    if (!query.trim() && !rootPath) {
+      setPhase("Everything 検索中…");
+      const everythingQuery = rootPath ? `path:"${rootPath}"` : "";
+      try {
+        // Everything候補上限(1000件)に合わせる
+        const items = await searchFiles(everythingQuery, 1000);
+        if (seq !== searchSeqRef.current) return;
+        setResults(items);
+        stopElapsedTimer(performance.now() - t0);
+        setPhase(`完了 — ${items.length}件 / ${Math.round(performance.now() - t0)}ms`);
+      } catch {
+        if (seq !== searchSeqRef.current) return;
+        setResults([]);
+        stopElapsedTimer(performance.now() - t0);
+        setPhase("エラーが発生しました");
+      } finally {
+        if (seq === searchSeqRef.current) setIsLoading(false);
+      }
+      return;
+    }
+
+    setPhase("Phase 1: Everything 絞り込み…");
     setCounts({ o: 0, s: 0, f: 0 });
     const counts = { o: 0, s: 0, f: 0 };
     let phaseAdvanced = false;
-    const t0 = performance.now();
-    startElapsedTimer(t0);
     try {
       const items = await semanticSearch(query, {
+        // Everything候補上限(1000件)に合わせ、A*の上位K件絞り込みで結果が削られないようにする
+        topK: 1000,
         rootPath,
         onExplore: (ev) => {
+          if (seq !== searchSeqRef.current) return; // 古い実行からの遅延イベントは無視（カラム重複防止）
           exploreEventsRef.current.push(ev);
-          setColumns(buildColumnsFromEvents(exploreEventsRef.current));
+          setColumns(buildColumnsFromEvents(exploreEventsRef.current, rootPath));
           if (!phaseAdvanced) {
             phaseAdvanced = true;
             setPhase("Phase 2: A*探索…");
@@ -184,6 +217,7 @@ export default function App() {
           setLogEntry(exploreLogEntry(ev, ++logKeyRef.current));
         },
       });
+      if (seq !== searchSeqRef.current) return;
       // SemanticResult → SearchResult（ResultList 互換）に変換
       const normalized: SearchResult[] = items.map(r => ({
         name: r.name,
@@ -199,11 +233,12 @@ export default function App() {
       stopElapsedTimer(performance.now() - t0);
       setPhase(`完了 — ${normalized.length}件 / ${Math.round(performance.now() - t0)}ms`);
     } catch {
+      if (seq !== searchSeqRef.current) return;
       setResults([]);
       stopElapsedTimer(performance.now() - t0);
       setPhase("エラーが発生しました");
     } finally {
-      setIsLoading(false);
+      if (seq === searchSeqRef.current) setIsLoading(false);
     }
   }, [query, rootPath, startElapsedTimer, stopElapsedTimer]);
 
@@ -220,17 +255,9 @@ export default function App() {
     setRootPath("");
   }, []);
 
-  // 初回表示: 検索キーワード未入力でも全ファイルを表示する（Everythingの挙動に合わせる）
+  // 初回表示および、ルートフォルダの確定・解除（全体に戻す）時に即座に一覧を取得する
   useEffect(() => {
     handleSearch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ルートフォルダ確定後、即座に一覧を取得する
-  useEffect(() => {
-    if (rootPath) {
-      handleSearch();
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootPath]);
 

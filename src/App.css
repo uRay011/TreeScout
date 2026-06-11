@@ -276,6 +276,7 @@ body {
 .left-pane {
   min-width: 200px;
   max-width: calc(100vw - 280px);
+  height: 100%;
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   display: flex;

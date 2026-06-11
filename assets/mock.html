@@ -1333,8 +1333,9 @@
     <button class="winctrl" title="最小化">
       <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg>
     </button>
-    <button class="winctrl" title="最大化">
+    <button class="winctrl" id="winMaximize" title="最大化">
       <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" fill="none"/></svg>
+      <svg width="10" height="10" viewBox="0 0 10 10" hidden><rect x="0.5" y="2.5" width="7" height="7" stroke="currentColor" fill="none"/><path d="M2.5 2.5V0.5H9.5V7.5H7.5" stroke="currentColor" fill="none"/></svg>
     </button>
     <button class="winctrl close" title="閉じる">
       <svg width="10" height="10" viewBox="0 0 10 10">
@@ -2370,6 +2371,16 @@ function checkMenuOverflow() {
   }
 }
 new ResizeObserver(checkMenuOverflow).observe(document.querySelector('.titlebar'));
+
+/* 最大化/元に戻すボタンのアイコン切替 */
+const winMaximize = $('winMaximize');
+const [iconMaximize, iconRestore] = winMaximize.querySelectorAll('svg');
+winMaximize.addEventListener('click', () => {
+  const maximized = winMaximize.classList.toggle('is-maximized');
+  iconMaximize.hidden = maximized;
+  iconRestore.hidden  = !maximized;
+  winMaximize.title   = maximized ? '元に戻す(縮小)' : '最大化';
+});
 
 /* ═══════════════════════════════════════
    SECTION J3b: 表示メニュー（左ペイン表示モード）

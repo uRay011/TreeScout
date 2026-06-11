@@ -20,6 +20,7 @@ function extClass(ext: string) {
 }
 
 function formatSize(bytes: number): string {
+  if (Number.isNaN(bytes)) return "";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -114,11 +115,14 @@ export function ResultList({ results, selectedIndex, onSelect, onOpen, query, is
 
   const viewClass = viewMode === "compact" ? " view-compact" : viewMode === "detail" ? " view-detail" : "";
 
+  // 検索キーワード未入力時（Everythingの全件表示）はスコアが付与されないため非表示にする
+  const hasScore = query.trim() !== "";
+
   return (
     <div className={`left-pane${isMd ? " w-md" : ""}${isLg ? " w-lg" : ""}${viewClass}`} id="leftPane" ref={paneRef}>
       {/* ── ヘッダー ── */}
       <div className="list-header" role="row">
-        <ColHeader col="score"  label="一致"     className="col-h-score" />
+        {hasScore && <ColHeader col="score"  label="一致"     className="col-h-score" />}
         <ColHeader col="name"   label="名前"     className="col-h-name" />
         <ColHeader col="folder" label="フォルダ" className="col-h-folder" />
         <ColHeader col="size"   label="サイズ"   className="col-h-size" />
@@ -129,7 +133,7 @@ export function ResultList({ results, selectedIndex, onSelect, onOpen, query, is
       <ul className="file-list" role="listbox" aria-label="検索結果">
         {isLoading && sorted.length === 0 && SKELETON_WIDTHS.map((w, i) => (
           <li className="sk-row" key={i} aria-hidden>
-            <span className="sk-block sk-score" />
+            {hasScore && <span className="sk-block sk-score" />}
             <span className="sk-block sk-badge" />
             <span className="sk-block sk-line" style={{ flex: `0 0 ${w}%` }} />
           </li>
@@ -155,7 +159,7 @@ export function ResultList({ results, selectedIndex, onSelect, onOpen, query, is
               role="option"
               aria-selected={selectedIndex === i}
               className={`file-row${selectedIndex === i ? " selected" : ""}`}
-              style={{ "--heat-bg": heatBg(score) } as React.CSSProperties}
+              style={hasScore ? ({ "--heat-bg": heatBg(score) } as React.CSSProperties) : undefined}
               onClick={() => onSelect(i)}
               onDoubleClick={() => onOpen(r)}
               onKeyDown={(e) => {
@@ -163,13 +167,15 @@ export function ResultList({ results, selectedIndex, onSelect, onOpen, query, is
               }}
               tabIndex={selectedIndex === i ? 0 : -1}
             >
-              <span className="row-heatbar" aria-hidden />
-              <div className="row-score">
-                <span className="row-score-num">{score.toFixed(2)}</span>
-                <div className="row-score-bar">
-                  <div className="row-score-fill" style={{ transform: `scaleX(${score})` }} />
+              {hasScore && <span className="row-heatbar" aria-hidden />}
+              {hasScore && (
+                <div className="row-score">
+                  <span className="row-score-num">{score.toFixed(2)}</span>
+                  <div className="row-score-bar">
+                    <div className="row-score-fill" style={{ transform: `scaleX(${score})` }} />
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="row-main">
                 <div className="row-name">
                   <span className={`ext-badge ${extClass(r.ext)}`}>{r.ext.toUpperCase().slice(0, 4)}</span>
