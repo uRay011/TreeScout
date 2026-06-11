@@ -31,13 +31,15 @@ interface Props {
   isActive: boolean;
   index: number;
   onSelect: (entry: AstarEntry) => void;
+  /** 検索キーワード未入力時はスコア0=「最低スコア」ではなく「スコアなし」として無着色にする */
+  hasScore: boolean;
 }
 
-export function HeatmapItem({ entry, isActive, index, onSelect }: Props) {
-  const heatStyle = heatmapStyle(entry.score, entry.kind);
+export function HeatmapItem({ entry, isActive, index, onSelect, hasScore }: Props) {
+  const heatStyle = hasScore ? heatmapStyle(entry.score, entry.kind) : undefined;
   const isSkipped = entry.kind === "skipped";
   const tier = scoreTier(entry.score);
-  const heatLabel = entry.kind === "found" ? `, ${TIER_LABELS[tier]}` : "";
+  const heatLabel = hasScore && entry.kind === "found" ? `, ${TIER_LABELS[tier]}` : "";
 
   return (
     <motion.button
@@ -59,16 +61,18 @@ export function HeatmapItem({ entry, isActive, index, onSelect }: Props) {
       style={{ position: "relative", width: "100%", textAlign: "left", ...heatStyle }}
     >
       {/* ヒートマップ背景オーバーレイ（色・最終濃度はCSS変数 --heat-bg / --heat-opacity 経由） */}
-      <motion.span
-        className="heat-overlay"
-        aria-hidden
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.25, delay: index * 0.04 }}
-      />
+      {hasScore && (
+        <motion.span
+          className="heat-overlay"
+          aria-hidden
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.25, delay: index * 0.04 }}
+        />
+      )}
 
       {/* 左端ヒートバー：面のopacityでは潰れる低スコア帯を輝度差で判別させる */}
-      <span className="item-heatbar" aria-hidden />
+      {hasScore && <span className="item-heatbar" aria-hidden />}
 
       {/* アイコン */}
       <span className="col-icon">
@@ -90,7 +94,7 @@ export function HeatmapItem({ entry, isActive, index, onSelect }: Props) {
       )}
 
       {/* スコアバッジ（found のみ表示） */}
-      {entry.kind === "found" && (
+      {hasScore && entry.kind === "found" && (
         <span className="col-score">{entry.score.toFixed(2)}</span>
       )}
 

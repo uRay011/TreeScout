@@ -10,9 +10,11 @@ interface Props {
   isLast: boolean;
   /** AIガイドパスラインの点灯（選択中ファイルのスコア >= 0.8） */
   showGuide: boolean;
+  /** 検索キーワードが入力されているか（false時はヒートマップを無着色にする） */
+  hasScore: boolean;
 }
 
-export function ColumnPanel({ column, colIndex, onEntrySelect, isLast, showGuide }: Props) {
+export function ColumnPanel({ column, colIndex, onEntrySelect, isLast, showGuide, hasScore }: Props) {
   return (
     // カラム全体が左からスライドイン（コラム単位のアニメーション）
     <motion.div
@@ -43,6 +45,7 @@ export function ColumnPanel({ column, colIndex, onEntrySelect, isLast, showGuide
             isActive={column.activeEntryPath === entry.path}
             index={i}
             onSelect={(e) => onEntrySelect(colIndex, e)}
+            hasScore={hasScore}
           />
         ))}
 

@@ -14,8 +14,57 @@ export interface SearchResult {
   score?: number;
 }
 
-export async function searchFiles(query: string, max = 200): Promise<SearchResult[]> {
-  return invoke<SearchResult[]>("search_files", { query, max });
+// 検索メニューのトグル（大文字小文字の区別 / 単語に完全一致 / フォルダ名にマッチ）。
+// Rust側 search::MatchOptions と同形（camelCaseでシリアライズ）。
+export interface MatchOptions {
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  matchPath?: boolean;
+}
+
+export async function searchFiles(query: string, max = 200, options?: MatchOptions): Promise<SearchResult[]> {
+  return invoke<SearchResult[]>("search_files", { query, max, options });
+}
+
+// ── バックエンド窓取得（Everything 全件をRust側に常駐させ、可視窓だけ転送） ──
+//
+// 数十万件を1回のinvokeで全件転送すると JSON.parse がメインスレッドを止めるため、
+// browse() で全件をソートしてバックエンドに常駐させ、件数だけ受け取る。
+// 実際の行データは fetchWindow() で可視範囲＋先読み分だけ取得する（Everything の
+// LVS_OWNERDATA owner-data ListView と同じモデル）。
+export type BrowseSortCol = "name" | "folder" | "size" | "date";
+export interface BrowseSort {
+  col: BrowseSortCol;
+  asc: boolean;
+}
+
+/** Everything で query を実行し、sort 済み全件をバックエンドに常駐させて総件数を返す。 */
+export async function browse(query: string, sort: BrowseSort, options?: MatchOptions): Promise<number> {
+  return invoke<number>("browse", { query, sort, options });
+}
+
+/** 常駐スナップショットの [offset, offset+limit) を SearchResult 形で取得する。 */
+export async function fetchWindow(offset: number, limit: number): Promise<SearchResult[]> {
+  return invoke<SearchResult[]>("fetch_window", { offset, limit });
+}
+
+// Phase 4: カラムUIのフォルダ展開
+export interface DirEntry {
+  name: string;
+  path: string;
+  folder: string;
+  is_dir: boolean;
+  ext: string;
+  /** 検索クエリへの一致スコア（0.0〜1.0）。query 未指定時は 0.0 */
+  score: number;
+}
+
+/**
+ * `path` 直下のエントリ一覧を取得する（非再帰）。
+ * `query` を渡すと各エントリにヒート色用のスコアが付与される。
+ */
+export async function listDirectory(path: string, query?: string): Promise<DirEntry[]> {
+  return invoke<DirEntry[]>("list_directory", { path, query: query || null });
 }
 
 // Phase 4: フォルダembedding事前インデックス
@@ -37,6 +86,7 @@ export interface SemanticResult {
   path: string;
   name: string;
   ext: string;
+  is_dir: boolean;
   score: number;
 }
 
@@ -115,14 +165,18 @@ export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string
         const depth = pathDepth(ev.path);
         const col = ensureColumn(depth, basename(ev.path) || ev.path);
         if (!col) break;
-        col.entries.push({
+        const entry: AstarEntry = {
           path: ev.path,
           name: basename(ev.path),
           ext: "",
           is_dir: true,
           score: ev.h_score,
           kind: ev.type === "open_dir" ? "opened" : "skipped",
-        });
+        };
+        // 同一パスの再探索（h_score更新）は既存行を上書きし、重複行を防ぐ
+        const existing = col.entries.findIndex(e => e.path === ev.path);
+        if (existing >= 0) col.entries[existing] = entry;
+        else col.entries.push(entry);
         break;
       }
       case "found_file": {
@@ -130,14 +184,17 @@ export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string
         const parentLabel = basename(ev.path).replace(/[\\/][^\\/]+$/, "") || "結果";
         const col = ensureColumn(depth, parentLabel);
         if (!col) break;
-        col.entries.push({
+        const entry: AstarEntry = {
           path: ev.path,
           name: basename(ev.path),
           ext: extname(ev.path),
           is_dir: false,
           score: ev.score,
           kind: "found",
-        });
+        };
+        const existing = col.entries.findIndex(e => e.path === ev.path);
+        if (existing >= 0) col.entries[existing] = entry;
+        else col.entries.push(entry);
         col.activeEntryPath = ev.path;
         break;
       }
@@ -155,6 +212,8 @@ export interface SemanticSearchOptions {
   onExplore?: (event: ExploreEvent) => void;
   /** 探索のルートフォルダ（Everything の path: フィルタに渡す） */
   rootPath?: string;
+  /** 検索メニューのマッチオプション（大文字小文字の区別 / 単語に完全一致 / フォルダ名にマッチ） */
+  matchOptions?: MatchOptions;
 }
 
 /**
@@ -165,7 +224,7 @@ export async function semanticSearch(
   query: string,
   options: SemanticSearchOptions = {},
 ): Promise<SemanticResult[]> {
-  const { topK, lambda, mu, onExplore, rootPath } = options;
+  const { topK, lambda, mu, onExplore, rootPath, matchOptions } = options;
 
   let unlisten: UnlistenFn | undefined;
   const channel = onExplore ? `treescout://explore/${Date.now()}` : undefined;
@@ -182,6 +241,7 @@ export async function semanticSearch(
       mu: mu ?? null,
       exploreChannel: channel ?? null,
       rootPath: rootPath || null,
+      options: matchOptions ?? null,
     });
   } finally {
     unlisten?.();

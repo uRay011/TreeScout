@@ -36,12 +36,11 @@ export const TIER_LABELS: Record<HeatTier, string> = {
 };
 
 /**
- * スコアをバックグラウンド輝度に変換し、可読テキスト色を返す。
- * ダークテーマ前提で輝度 < 50% なら明色テキスト、>= 50% なら暗色テキストを選択する。
+ * スコアをバックグラウンド輝度に変換し、可読テキスト色を返す（mock_v2.html heatText() 準拠）。
+ * 背景輝度56%（score=0.6）以上は --bg、未満は --text を文字色として使う。
  */
 export function scoreToTextColor(score: number): string {
-  const lightness = 20 + score * 60;
-  return lightness >= 55 ? "hsl(220, 15%, 12%)" : "hsl(220, 20%, 90%)";
+  return score >= 0.6 ? "#0d1117" : "#e6edf3";
 }
 
 /** CSS変数として注入するインラインスタイルオブジェクトを生成する。

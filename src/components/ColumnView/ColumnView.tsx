@@ -10,9 +10,11 @@ interface Props {
   onEntrySelect: (colIndex: number, entry: AstarEntry) => void;
   /** AIガイドパスラインの点灯（選択中ファイルのスコア >= 0.8） */
   showGuide: boolean;
+  /** 検索キーワードが入力されているか（false時はヒートマップを無着色にする） */
+  hasScore: boolean;
 }
 
-export function ColumnView({ columns, onEntrySelect, showGuide }: Props) {
+export function ColumnView({ columns, onEntrySelect, showGuide, hasScore }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // カラムが追加されたら右端へ自動スクロール
@@ -51,6 +53,7 @@ export function ColumnView({ columns, onEntrySelect, showGuide }: Props) {
             onEntrySelect={handleEntrySelect}
             isLast={i === columns.length - 1}
             showGuide={showGuide}
+            hasScore={hasScore}
           />
         ))}
       </AnimatePresence>
