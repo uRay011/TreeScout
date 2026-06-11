@@ -10,6 +10,8 @@ export interface SearchResult {
   ext: string;
   size: number;
   modified: string;
+  /** セマンティック検索の一致スコア（0.0〜1.0）。Phase1検索結果では未設定 */
+  score?: number;
 }
 
 export async function searchFiles(query: string, max = 200): Promise<SearchResult[]> {
@@ -64,7 +66,7 @@ export interface AstarColumn {
   activeEntryPath: string | null;
 }
 
-function basename(path: string): string {
+export function basename(path: string): string {
   return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
 }
 
@@ -173,4 +175,16 @@ export async function semanticSearch(
   } finally {
     unlisten?.();
   }
+}
+
+// Phase 4: ファイルプレビュー（crates/preview の PreviewResult に対応）
+export type PreviewResult =
+  | { kind: "text"; content: string; truncated: boolean }
+  | { kind: "markdown"; content: string; truncated: boolean }
+  | { kind: "image" }
+  | { kind: "unsupported" };
+
+/** `path` のプレビューを取得する。テキスト/Markdownは先頭64KB、画像は種別判定のみ。 */
+export async function getPreview(path: string): Promise<PreviewResult> {
+  return invoke<PreviewResult>("get_preview", { path });
 }

@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { Search } from "lucide-react";
 
 interface Props {
@@ -10,6 +10,7 @@ interface Props {
 
 export function SearchBar({ value, onChange, onSubmit, isLoading }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [focused, setFocused] = useState(false);
 
   // Ctrl+F でフォーカス
   useEffect(() => {
@@ -49,7 +50,13 @@ export function SearchBar({ value, onChange, onSubmit, isLoading }: Props) {
             onSubmit();
           }
         }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
       />
+      <span className="search-kbd" aria-hidden>
+        {focused ? <kbd>Enter</kbd> : <><kbd>Ctrl</kbd><kbd>F</kbd></>}
+      </span>
+      <span className="search-loadbar" aria-hidden />
     </div>
   );
 }

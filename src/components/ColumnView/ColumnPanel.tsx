@@ -6,9 +6,13 @@ interface Props {
   column: AstarColumn;
   colIndex: number;
   onEntrySelect: (colIndex: number, entry: AstarEntry) => void;
+  /** 最終カラムかどうか（AIガイドパスラインの表示位置） */
+  isLast: boolean;
+  /** AIガイドパスラインの点灯（選択中ファイルのスコア >= 0.8） */
+  showGuide: boolean;
 }
 
-export function ColumnPanel({ column, colIndex, onEntrySelect }: Props) {
+export function ColumnPanel({ column, colIndex, onEntrySelect, isLast, showGuide }: Props) {
   return (
     // カラム全体が左からスライドイン（コラム単位のアニメーション）
     <motion.div
@@ -25,7 +29,10 @@ export function ColumnPanel({ column, colIndex, onEntrySelect }: Props) {
       }}
     >
       {/* ヘッダー */}
-      <div className="col-head">{column.label}</div>
+      <div className="col-head">
+        <span className="col-depth">{colIndex + 1}</span>
+        <span className="col-head-label">{column.label}</span>
+      </div>
 
       {/* アイテムリスト */}
       <div className="col-body">
@@ -38,6 +45,14 @@ export function ColumnPanel({ column, colIndex, onEntrySelect }: Props) {
             onSelect={(e) => onEntrySelect(colIndex, e)}
           />
         ))}
+
+        {/* AIガイドパスライン: 最終カラムの found 一覧の下端で発光 */}
+        {isLast && (
+          <div
+            className={`guide-path-glow${showGuide ? " on" : ""}`}
+            aria-label="AIガイドパス: 高スコアファイル"
+          />
+        )}
       </div></motion.div>
   );
 }
