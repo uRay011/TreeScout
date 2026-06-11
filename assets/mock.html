@@ -20,9 +20,6 @@
     --accent:     #316dca;
     --sel-bg:     #1c2d3f;
     --sel-border: #316dca;
-    --h9: hsl(215,70%,62%); --h8: hsl(215,65%,52%); --h7: hsl(215,58%,44%);
-    --h6: hsl(215,50%,37%); --h5: hsl(215,42%,31%); --h4: hsl(215,34%,26%);
-    --h3: hsl(215,26%,22%); --h2: hsl(215,18%,18%);
     --folder:   #c69026;
     --c-tsx:    #58a6ff;
     --c-ts:     #3b82f6;
@@ -429,29 +426,43 @@
     padding: 5px 10px;
     cursor: pointer;
     overflow: hidden;
-    transition: background 0.08s;
+    transition: background 0.08s, color 0.1s;
+    color: var(--text2);
   }
-  .col-item:hover { background: var(--bg4); }
-  .col-item.active { background: var(--sel-bg); }
-  .col-item.active::before {
-    content: '';
+  .col-item:hover  { background: var(--bg4); color: var(--text); }
+  .col-item.active { background: var(--sel-bg); color: var(--text); }
+  .col-item.skip   { cursor: default; }
+
+  /* ヒートマップ背景オーバーレイ：スコア(0.0〜1.0) → hsl(220,80%,L%) を --heat-bg に注入し、
+     opacity は --heat-opacity * 0.18 で一律スケール（design.md §3.5） */
+  .heat-overlay {
+    position: absolute;
+    inset: 0;
+    background: var(--heat-bg, transparent);
+    opacity: calc(var(--heat-opacity, 0) * 0.18);
+    pointer-events: none;
+  }
+
+  /* アクティブ行の左端パスライン */
+  .col-active-line {
     position: absolute;
     left: 0; top: 0; bottom: 0;
     width: 2px;
     background: var(--accent);
-    border-radius: 0 1px 1px 0;
+    transform-origin: top;
   }
-  .col-item.skip { opacity: 0.35; }
 
-  .heat { position: absolute; inset: 0; pointer-events: none; opacity: 0.18; }
-  .heat.h9 { background: var(--h9); } .heat.h8 { background: var(--h8); }
-  .heat.h7 { background: var(--h7); } .heat.h6 { background: var(--h6); }
-  .heat.h5 { background: var(--h5); } .heat.h4 { background: var(--h4); }
-  .heat.h3 { background: var(--h3); } .heat.h2 { background: var(--h2); }
-
-  .col-icon    { font-size: 12px; z-index: 1; flex-shrink: 0; }
+  .col-icon    { font-size: 12px; z-index: 1; flex-shrink: 0; display: flex; align-items: center; }
   .col-name    { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); z-index: 1; }
   .col-chevron { color: var(--text3); font-size: 10px; z-index: 1; flex-shrink: 0; }
+  /* スコアバッジ：found のみ表示。背景輝度に応じて読みやすい文字色を --heat-text で切替 */
+  .col-score {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--heat-text, var(--text3));
+    font-variant-numeric: tabular-nums;
+    z-index: 1;
+  }
 
   .detail-card .col-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
   .detail-filename { font-size: 13px; font-weight: 600; color: var(--text); word-break: break-all; }
@@ -459,6 +470,32 @@
   .detail-row   { display: flex; gap: 8px; align-items: baseline; }
   .detail-key   { width: 44px; font-size: 10px; color: var(--text3); flex-shrink: 0; }
   .detail-val   { font-size: 11px; color: var(--text2); }
+
+  /* AIガイドパスライン：score >= 0.8 のファイル選択時に光るライン（design.md §3.5） */
+  .guide-path-glow {
+    height: 2px;
+    border-radius: 1px;
+    margin-top: 4px;
+    background: linear-gradient(90deg, var(--accent), #58a6ff, var(--accent));
+    box-shadow: 0 0 6px 1px var(--accent);
+    transform-origin: left;
+  }
+
+  /* 空状態：検索結果なし / 探索カラム未生成 */
+  .empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    color: var(--text3);
+    font-size: 12px;
+  }
+  .col-panel.phase4-placeholder .col-body {
+    padding: 16px;
+    color: var(--text2);
+    font-size: 11px;
+    line-height: 1.7;
+  }
 
   /* ステータスバー */
   .statusbar {
@@ -473,12 +510,37 @@
     font-size: 11px;
     color: var(--text3);
   }
-  .status-dot  { width: 6px; height: 6px; border-radius: 50%; background: #3fb950; flex-shrink: 0; }
+  .status-dot  { width: 6px; height: 6px; border-radius: 50%; background: #3fb950; flex-shrink: 0; transition: background 0.2s; }
+  .status-dot.loading { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
   .status-text { color: var(--text2); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+  }
+
+  /* 検索ローディング中の微妙なフェード */
+  .search-wrap[data-loading="true"] { opacity: 0.7; }
 
   .ico-folder    { color: var(--folder); }
   .ico-file-tsx  { color: var(--c-tsx); }
   .ico-file-ts   { color: var(--c-ts); }
+
+  /* フォーカスリング（キーボード操作用） */
+  .col-h:focus-visible,
+  .winctrl:focus-visible,
+  .file-row:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  /* アクセシビリティ: prefers-reduced-motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 </style>
 </head>
 <body>
@@ -668,23 +730,27 @@
       <div class="col-panel">
         <div class="col-head">ルート</div>
         <div class="col-body">
-          <div class="col-item active">
-            <div class="heat h9"></div>
+          <div class="col-item active" style="--heat-bg: hsl(220,80%,77%); --heat-opacity: 1; --heat-text: hsl(220,15%,12%);">
+            <div class="heat-overlay"></div>
+            <div class="col-active-line"></div>
             <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
             <span class="col-name">src/</span>
             <span class="col-chevron">›</span>
+            <span class="col-score">★0.95</span>
           </div>
-          <div class="col-item skip">
-            <div class="heat h3"></div>
+          <div class="col-item skip" style="--heat-bg: hsl(220,80%,38%); --heat-opacity: 1;">
+            <div class="heat-overlay"></div>
             <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
             <span class="col-name">docs/</span>
             <span class="col-chevron">›</span>
+            <span class="col-score">★0.30</span>
           </div>
           <div class="col-item skip">
-            <div class="heat h2"></div>
+            <div class="heat-overlay"></div>
             <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
             <span class="col-name">tests/</span>
             <span class="col-chevron">›</span>
+            <span class="col-score">★0.12</span>
           </div>
         </div>
       </div>
@@ -692,23 +758,27 @@
       <div class="col-panel">
         <div class="col-head">SRC/</div>
         <div class="col-body">
-          <div class="col-item active">
-            <div class="heat h9"></div>
+          <div class="col-item active" style="--heat-bg: hsl(220,80%,77%); --heat-opacity: 1; --heat-text: hsl(220,15%,12%);">
+            <div class="heat-overlay"></div>
+            <div class="col-active-line"></div>
             <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
             <span class="col-name">components/</span>
             <span class="col-chevron">›</span>
+            <span class="col-score">★0.95</span>
           </div>
-          <div class="col-item">
-            <div class="heat h7"></div>
+          <div class="col-item" style="--heat-bg: hsl(220,80%,62%); --heat-opacity: 1;">
+            <div class="heat-overlay"></div>
             <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
             <span class="col-name">hooks/</span>
             <span class="col-chevron">›</span>
+            <span class="col-score">★0.70</span>
           </div>
           <div class="col-item skip">
-            <div class="heat h2"></div>
+            <div class="heat-overlay"></div>
             <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
             <span class="col-name">utils/</span>
             <span class="col-chevron">›</span>
+            <span class="col-score">★0.10</span>
           </div>
         </div>
       </div>
@@ -716,23 +786,27 @@
       <div class="col-panel">
         <div class="col-head">COMPONENTS/</div>
         <div class="col-body">
-          <div class="col-item active">
-            <div class="heat h9"></div>
+          <div class="col-item active" style="--heat-bg: hsl(220,80%,77%); --heat-opacity: 1; --heat-text: hsl(220,15%,12%);">
+            <div class="heat-overlay"></div>
+            <div class="col-active-line"></div>
             <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
             <span class="col-name">Button/</span>
             <span class="col-chevron">›</span>
+            <span class="col-score">★0.95</span>
           </div>
-          <div class="col-item">
-            <div class="heat h5"></div>
+          <div class="col-item" style="--heat-bg: hsl(220,80%,50%); --heat-opacity: 1;">
+            <div class="heat-overlay"></div>
             <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
             <span class="col-name">Nav/</span>
             <span class="col-chevron">›</span>
+            <span class="col-score">★0.50</span>
           </div>
-          <div class="col-item">
-            <div class="heat h5"></div>
+          <div class="col-item" style="--heat-bg: hsl(220,80%,50%); --heat-opacity: 1;">
+            <div class="heat-overlay"></div>
             <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
             <span class="col-name">Modal/</span>
             <span class="col-chevron">›</span>
+            <span class="col-score">★0.50</span>
           </div>
         </div>
       </div>
@@ -740,25 +814,30 @@
       <div class="col-panel">
         <div class="col-head">BUTTON/</div>
         <div class="col-body">
-          <div class="col-item active" onclick="selColFile(this,'ButtonGroup.tsx','tsx','3.2 KB','2026-06-06')">
-            <div class="heat h9"></div>
+          <div class="col-item active" style="--heat-bg: hsl(220,80%,77%); --heat-opacity: 1; --heat-text: hsl(220,15%,12%);" onclick="selColFile(this,'ButtonGroup.tsx','tsx','3.2 KB','2026-06-06',0.95)">
+            <div class="heat-overlay"></div>
+            <div class="col-active-line"></div>
             <span class="col-icon ico-file-tsx"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
             <span class="col-name">ButtonGroup.tsx</span>
+            <span class="col-score">★0.95</span>
           </div>
-          <div class="col-item" onclick="selColFile(this,'Button.tsx','tsx','2.4 KB','2026-06-08')">
-            <div class="heat h9"></div>
+          <div class="col-item" style="--heat-bg: hsl(220,80%,75%); --heat-opacity: 1; --heat-text: hsl(220,15%,12%);" onclick="selColFile(this,'Button.tsx','tsx','2.4 KB','2026-06-08',0.92)">
+            <div class="heat-overlay"></div>
             <span class="col-icon ico-file-tsx"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
             <span class="col-name">Button.tsx</span>
+            <span class="col-score">★0.92</span>
           </div>
-          <div class="col-item" onclick="selColFile(this,'ButtonIcon.tsx','tsx','1.3 KB','2026-06-03')">
-            <div class="heat h8"></div>
+          <div class="col-item" style="--heat-bg: hsl(220,80%,68%); --heat-opacity: 1;" onclick="selColFile(this,'ButtonIcon.tsx','tsx','1.3 KB','2026-06-03',0.80)">
+            <div class="heat-overlay"></div>
             <span class="col-icon ico-file-tsx"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
             <span class="col-name">ButtonIcon.tsx</span>
+            <span class="col-score">★0.80</span>
           </div>
-          <div class="col-item" onclick="selColFile(this,'index.ts','ts','0.2 KB','2026-06-08')">
-            <div class="heat h4"></div>
+          <div class="col-item" style="--heat-bg: hsl(220,80%,44%); --heat-opacity: 1;" onclick="selColFile(this,'index.ts','ts','0.2 KB','2026-06-08',0.40)">
+            <div class="heat-overlay"></div>
             <span class="col-icon ico-file-ts"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
             <span class="col-name">index.ts</span>
+            <span class="col-score">★0.40</span>
           </div>
         </div>
       </div>
@@ -769,9 +848,12 @@
           <div class="detail-filename" id="detailCardName">ButtonGroup.tsx</div>
           <div class="detail-table">
             <div class="detail-row"><span class="detail-key">形式</span><span class="detail-val" id="detailCardExt">tsx</span></div>
+            <div class="detail-row"><span class="detail-key">スコア</span><span class="detail-val" id="detailCardScore">★ 0.950</span></div>
             <div class="detail-row"><span class="detail-key">サイズ</span><span class="detail-val" id="detailCardSize">3.2 KB</span></div>
             <div class="detail-row"><span class="detail-key">更新日</span><span class="detail-val" id="detailCardDate">2026-06-06</span></div>
           </div>
+          <!-- AIガイドパスライン: score >= 0.8 のファイルで表示 -->
+          <div class="guide-path-glow" id="detailCardGlow"></div>
         </div>
       </div>
 
@@ -781,8 +863,8 @@
 </div>
 
 <div class="statusbar">
-  <span class="status-dot"></span>
-  <span class="status-text">10件 · 0.14s</span>
+  <span class="status-dot loading"></span>
+  <span class="status-text">検索中…</span>
 </div>
 
 <script>
@@ -793,14 +875,25 @@
   }
 
   /* ── カラムファイル選択 ── */
-  function selColFile(el, name, ext, size, date) {
-    el.closest('.col-panel').querySelectorAll('.col-item').forEach(i => i.classList.remove('active'));
+  function selColFile(el, name, ext, size, date, score) {
+    el.closest('.col-panel').querySelectorAll('.col-item').forEach(i => {
+      i.classList.remove('active');
+      i.querySelector('.col-active-line')?.remove();
+    });
     el.classList.add('active');
+    if (!el.querySelector('.col-active-line')) {
+      const line = document.createElement('div');
+      line.className = 'col-active-line';
+      el.insertBefore(line, el.firstChild.nextSibling);
+    }
     document.getElementById('detailCardHead').textContent = name;
     document.getElementById('detailCardName').textContent = name;
     document.getElementById('detailCardExt').textContent  = ext;
+    document.getElementById('detailCardScore').textContent = `★ ${score.toFixed(3)}`;
     document.getElementById('detailCardSize').textContent = size;
     document.getElementById('detailCardDate').textContent = date;
+    // AIガイドパスライン: スコア >= 0.8 のみ表示
+    document.getElementById('detailCardGlow').style.display = score >= 0.8 ? '' : 'none';
   }
 
   /* ── ペイン分割リサイザー ── */

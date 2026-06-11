@@ -1,0 +1,19 @@
+[package]
+name = "pipeline"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nlp       = { path = "../nlp" }
+astar     = { path = "../astar" }
+embedding = { path = "../embedding", default-features = false }
+thiserror = "2"
+
+# Windows 専用: Everything FFI（cross-compile 対象外では空スタブになる）
+[target.'cfg(windows)'.dependencies]
+search = { path = "../search" }
+
+[features]
+default = []
+# Lindera ipadic を埋め込む（精度優先）
+embed-ipadic = ["nlp/embed-ipadic"]

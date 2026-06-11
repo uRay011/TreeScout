@@ -1,7 +1,17 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useLayoutEffect } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SearchBar } from "./components/SearchBar/SearchBar";
 import { ResultList } from "./components/SearchBar/ResultList";
-import { searchFiles, SearchResult } from "./lib/tauri";
+import { ColumnView } from "./components/ColumnView/ColumnView";
+import {
+  semanticSearch,
+  SearchResult,
+  ExploreEvent,
+  AstarColumn,
+  AstarEntry,
+  buildColumnsFromEvents,
+} from "./lib/tauri";
 import "./App.css";
 
 // ── ロゴSVG ──────────────────────────────────────
@@ -20,15 +30,16 @@ function LogoMark() {
 
 // ── ウィンドウコントロール ────────────────────────
 function WindowControls() {
+  const appWindow = getCurrentWindow();
   return (
     <div className="titlebar-winctrls" aria-label="ウィンドウ操作">
-      <button className="winctrl" title="最小化" aria-label="最小化" type="button">
+      <button className="winctrl" title="最小化" aria-label="最小化" type="button" onClick={() => appWindow.minimize()}>
         <svg width="10" height="1" viewBox="0 0 10 1" aria-hidden><rect width="10" height="1" fill="currentColor"/></svg>
       </button>
-      <button className="winctrl" title="最大化" aria-label="最大化" type="button">
+      <button className="winctrl" title="最大化" aria-label="最大化" type="button" onClick={() => appWindow.toggleMaximize()}>
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden><rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" fill="none"/></svg>
       </button>
-      <button className="winctrl close" title="閉じる" aria-label="閉じる" type="button">
+      <button className="winctrl close" title="閉じる" aria-label="閉じる" type="button" onClick={() => appWindow.close()}>
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
           <line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
           <line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
@@ -47,22 +58,49 @@ export default function App() {
   const [isLoading,     setIsLoading]     = useState(false);
   const [elapsed,       setElapsed]       = useState(0);
   const [menuOpen,      setMenuOpen]      = useState(false);
+  // メニューバーと検索ボックスが重なる前にハンバーガーへ切り替え
+  const [menuCollapsed, setMenuCollapsed] = useState(false);
+  const titlebarRef = useRef<HTMLElement>(null);
+  const menuRef     = useRef<HTMLElement>(null);
+  const searchRef   = useRef<HTMLDivElement>(null);
+
+  // Phase 4: A*探索カラムUI
+  const [columns,      setColumns]      = useState<AstarColumn[]>([]);
+  const [selectedFile, setSelectedFile] = useState<AstarEntry | null>(null);
+  const exploreEventsRef = useRef<ExploreEvent[]>([]);
+
+  // ルートフォルダ（探索範囲の絞り込み）
+  const [rootInput, setRootInput] = useState("");
+  const [rootPath,  setRootPath]  = useState("");
 
   // ペイン分割リサイズ
   const leftPaneRef  = useRef<HTMLDivElement>(null);
   const resizerRef   = useRef<HTMLDivElement>(null);
 
   const handleSearch = useCallback(async () => {
-    if (!query.trim()) return;
+    if (!query.trim() && !rootPath) return;
     setIsLoading(true);
+    setColumns([]);
+    setSelectedFile(null);
+    exploreEventsRef.current = [];
     const t0 = performance.now();
     try {
-      const items = await searchFiles(query);
-      // size/modified は現状 Everything から取れないためデフォルト値を補完
-      const normalized = items.map(r => ({
-        ...r,
-        size: r.size ?? 0,
-        modified: r.modified ?? "",
+      const items = await semanticSearch(query, {
+        rootPath,
+        onExplore: (ev) => {
+          exploreEventsRef.current.push(ev);
+          setColumns(buildColumnsFromEvents(exploreEventsRef.current));
+        },
+      });
+      // SemanticResult → SearchResult（ResultList 互換）に変換
+      const normalized: SearchResult[] = items.map(r => ({
+        name: r.name,
+        path: r.path,
+        folder: r.path.replace(/[\\/][^\\/]+$/, "") || r.path,
+        is_dir: false,
+        ext: r.ext,
+        size: 0,
+        modified: "",
       }));
       setResults(normalized);
       setElapsed((performance.now() - t0) / 1000);
@@ -72,7 +110,37 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [query]);
+  }, [query, rootPath]);
+
+  // ルートフォルダ選択ダイアログ
+  const handleBrowseRoot = useCallback(async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected === "string") {
+      setRootInput(selected);
+      setRootPath(selected);
+    }
+  }, []);
+
+  // ルートフォルダ入力を確定
+  const handleApplyRoot = useCallback(() => {
+    setRootPath(rootInput.trim());
+  }, [rootInput]);
+
+  // ルートフォルダ確定後、即座に一覧を取得する
+  useEffect(() => {
+    if (rootPath) {
+      handleSearch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootPath]);
+
+  // カラムUI: エントリ選択 → アクティブ化 + 詳細カード表示
+  const handleColumnEntrySelect = useCallback((colIndex: number, entry: AstarEntry) => {
+    setColumns(cols =>
+      cols.map((col, i) => (i === colIndex ? { ...col, activeEntryPath: entry.path } : col))
+    );
+    setSelectedFile(entry.kind === "found" ? entry : null);
+  }, []);
 
   // ── キーボードナビゲーション ──
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -84,6 +152,40 @@ export default function App() {
       setSelectedIndex(i => Math.max(i - 1, 0));
     }
   }, [results.length]);
+
+  // ── メニューバー/検索ボックスの重なり検知 ──
+  // メニュー項目は固定なので、表示中に一度だけ自然幅を計測してキャッシュする
+  const menuNaturalWidthRef = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    const titlebarEl = titlebarRef.current;
+    const searchEl   = searchRef.current;
+    if (!titlebarEl || !searchEl) return;
+
+    const MARGIN = 16; // メニューと検索ボックスの間に最低限確保する余白(px)
+
+    const check = () => {
+      const menuEl = menuRef.current;
+      if (menuEl && !menuEl.hidden) {
+        menuNaturalWidthRef.current = menuEl.getBoundingClientRect().width;
+      }
+      const menuWidth = menuNaturalWidthRef.current;
+      if (menuWidth == null) return;
+
+      const logoWidth = titlebarEl.querySelector(".titlebar-logo")?.getBoundingClientRect().width ?? 0;
+      const menuLeft  = (titlebarEl.querySelector(".titlebar-logo")?.getBoundingClientRect().right ?? logoWidth);
+      const menuRight = menuLeft + menuWidth;
+      const searchLeft = searchEl.getBoundingClientRect().left;
+
+      setMenuCollapsed(menuRight + MARGIN > searchLeft);
+    };
+
+    const ro = new ResizeObserver(check);
+    ro.observe(titlebarEl);
+    check();
+
+    return () => ro.disconnect();
+  }, []);
 
   // ── ペイン分割リサイズ ──
   const onResizerMouseDown = (e: React.MouseEvent) => {
@@ -106,35 +208,46 @@ export default function App() {
     window.addEventListener("mouseup", onUp);
   };
 
-  const selectedResult = results[selectedIndex] ?? null;
-
   return (
     <div className="app-root" onKeyDown={handleKeyDown}>
       {/* ══ TITLEBAR ══ */}
-      <header className="titlebar" role="banner">
+      <header
+        className="titlebar"
+        role="banner"
+        ref={titlebarRef}
+        onDoubleClick={() => getCurrentWindow().toggleMaximize()}
+      >
         <div className="titlebar-logo" aria-label="TreeScout">
           <LogoMark />
           <span className="logo-name">TreeScout</span>
         </div>
 
-        <nav className="titlebar-menu" aria-label="メインメニュー" id="titlebarMenu">
+        <nav
+          className="titlebar-menu"
+          aria-label="メインメニュー"
+          id="titlebarMenu"
+          ref={menuRef}
+          hidden={menuCollapsed}
+        >
           {MENU_ITEMS.map(item => (
             <button key={item} className="menu-btn" type="button">{item}</button>
           ))}
         </nav>
 
         {/* ハンバーガー（幅不足時） */}
-        <button
-          className="menu-hamburger"
-          type="button"
-          aria-label="メニューを開く"
-          aria-expanded={menuOpen}
-          aria-controls="menuDropdown"
-          onClick={() => setMenuOpen(v => !v)}
-        >
-          <span/><span/><span/>
-        </button>
-        {menuOpen && (
+        {menuCollapsed && (
+          <button
+            className="menu-hamburger"
+            type="button"
+            aria-label="メニューを開く"
+            aria-expanded={menuOpen}
+            aria-controls="menuDropdown"
+            onClick={() => setMenuOpen(v => !v)}
+          >
+            <span/><span/><span/>
+          </button>
+        )}
+        {menuCollapsed && menuOpen && (
           <div className="menu-dropdown open" id="menuDropdown" role="menu">
             {MENU_ITEMS.map(item => (
               <button key={item} className="menu-btn" role="menuitem" type="button">{item}</button>
@@ -143,7 +256,7 @@ export default function App() {
         )}
 
         {/* 検索（タイトルバー中央） */}
-        <div className="titlebar-search-center">
+        <div className="titlebar-search-center" ref={searchRef}>
           <SearchBar
             value={query}
             onChange={setQuery}
@@ -183,54 +296,24 @@ export default function App() {
             <span className="path-label">ルート</span>
             <input
               className="path-input"
-              defaultValue=""
+              value={rootInput}
+              onChange={(e) => setRootInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleApplyRoot();
+              }}
+              placeholder="未指定（全体検索）"
               aria-label="ルートパス"
-              readOnly
             />
-            <button className="btn-sm" type="button">参照</button>
-            <button className="btn-primary" type="button">適用</button>
+            <button className="btn-sm" type="button" onClick={handleBrowseRoot}>参照</button>
+            <button className="btn-primary" type="button" onClick={handleApplyRoot}>適用</button>
           </div>
 
-          {/* カラムエクスプローラー（Phase4実装予定） */}
-          <div className="columns-scroll">
-            <div className="col-panel phase4-placeholder">
-              <div className="col-head">Phase 4 実装予定</div>
-              <div className="col-body" style={{ padding: "16px", color: "var(--text2)", fontSize: "11px", lineHeight: "1.6" }}>
-                探索型カラム UI・ヒートマップ・<br/>AIガイドパスラインは<br/>Phase 4 で実装します。
-              </div>
-            </div>
-            {/* 詳細カード */}
-            {selectedResult && (
-              <div className="col-panel detail-card">
-                <div className="col-head">{selectedResult.name}</div>
-                <div className="col-body">
-                  <div className="detail-filename">{selectedResult.name}</div>
-                  <div className="detail-table">
-                    <div className="detail-row">
-                      <span className="detail-key">形式</span>
-                      <span className="detail-val">{selectedResult.ext}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-key">サイズ</span>
-                      <span className="detail-val">
-                        {selectedResult.size < 1024
-                          ? `${selectedResult.size} B`
-                          : `${(selectedResult.size / 1024).toFixed(1)} KB`}
-                      </span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-key">更新日</span>
-                      <span className="detail-val">{selectedResult.modified}</span>
-                    </div>
-                    <div className="detail-row">
-                      <span className="detail-key">パス</span>
-                      <span className="detail-val" style={{ wordBreak: "break-all" }}>{selectedResult.path}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          {/* 探索型カラムUI: A*探索ログをリアルタイム展開（design.md §3.3） */}
+          <ColumnView
+            columns={columns}
+            onEntrySelect={handleColumnEntrySelect}
+            selectedFile={selectedFile}
+          />
         </div>
       </main>
 

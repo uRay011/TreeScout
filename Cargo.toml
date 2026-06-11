@@ -4,5 +4,9 @@ members = [
     "crates/search",
     "crates/nlp",
     "crates/embedding",
+    "crates/astar",
+    "crates/pipeline",
+    "crates/index",
+    "crates/preview",
 ]
 resolver = "2"

@@ -1,0 +1,11 @@
+[package]
+name = "astar"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# 埋め込みクレートの共通インターフェースと cosine 計算を再利用
+embedding = { path = "../embedding", default-features = false }
+
+[dev-dependencies]
+approx = "0.5"

@@ -16,6 +16,9 @@ dist-ssr
 target/
 Cargo.lock
 
+# Local sync scripts
+scripts/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
