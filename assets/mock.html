@@ -4,36 +4,83 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TreeScout</title>
+<!--
+  TreeScout UIモック v2 — mock.html のUI/UX改善版
+  ・3ペイン構成（結果リスト / カラム探索＋ヒートマップ / プレビュー）
+  ・A*探索デモアニメーション（Enterで再生 / Escで中断）
+  ・実データ結合なし。デザイントークン・状態表現・モーション仕様のリファレンス
+-->
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
+  /* ═══════════════════════════════════════
+     SECTION S1: デザイントークン・リセット・共通部品
+  ═══════════════════════════════════════ */
   :root {
-    --bg:         #0d1117;
-    --bg2:        #161b22;
-    --bg3:        #1c2128;
-    --bg4:        #262c36;
-    --bg5:        #2d333b;
-    --border:     #373e47;
-    --text:       #cdd9e5;
-    --text2:      #768390;
-    --text3:      #545d68;
-    --accent:     #316dca;
-    --sel-bg:     #1c2d3f;
-    --sel-border: #316dca;
-    --folder:   #c69026;
-    --c-tsx:    #58a6ff;
-    --c-ts:     #3b82f6;
-    --c-css:    #7ee8fa;
-    --c-md:     #768390;
-    --c-json:   #e3b341;
-    --c-rs:     #f07178;
-    --c-toml:   #e8b250;
-    --c-other:  #6e7681;
+    /* サーフェス（GitHub Dark 系・mock.html から継承） */
+    --bg:  #0d1117;
+    --bg2: #161b22;
+    --bg3: #1c2128;
+    --bg4: #262c36;
+    --bg5: #2d333b;
+    --border:        #373e47;
+    --border-subtle: #2d333b;
+
+    /* テキスト3階層（bg 上のコントラスト: 16.0 / 6.5 / 4.1 — text3 は補助ラベル専用） */
+    --text:  #e6edf3;
+    --text2: #9198a1;
+    --text3: #6e7681;
+
+    /* アクセント */
+    --accent:        #316dca;
+    --accent-bright: #58a6ff;
+    --sel-bg:        #1c2d3f;
+    --sel-bg-hover:  #21344d;
+    --sel-border:    #316dca;
+    --hover-bg: rgba(177,186,196,0.07);
+
+    /* 意味色 */
+    --success: #3fb950;
+    --warn:    #d29922;
+    --danger:  #f85149;
+
+    /* ヒートマップ: hsl(220,80%, 20%+score*60%) はJS側 heatBg() で算出（frontend.md準拠） */
+    --heat-alpha-max: 0.35;
+
+    /* 拡張子カラー */
+    --folder:  #c69026;
+    --c-tsx:   #58a6ff;
+    --c-ts:    #3b82f6;
+    --c-css:   #7ee8fa;
+    --c-md:    #768390;
+    --c-json:  #e3b341;
+    --c-rs:    #f07178;
+    --c-toml:  #e8b250;
+    --c-other: #6e7681;
+
+    /* タイポグラフィ */
     --font: 'Inter', 'Segoe UI', 'Yu Gothic UI', sans-serif;
-    --left-w: 520px;
+    --font-mono: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+
+    /* モーション（exit は enter の約65%） */
+    --ease-out: cubic-bezier(0.2, 0, 0, 1);
+    --dur-hover: 100ms;
+    --dur-enter: 180ms;
+    --dur-exit:  120ms;
+    --dur-panel: 240ms;
+
+    /* 余白・角丸 */
+    --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;  --sp-6: 24px;
+    --r-sm: 4px;  --r-md: 6px;  --r-pill: 999px;
+
+    /* ペイン幅 */
+    --left-w:  320px;
+    --right-w: 380px;
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { color-scheme: dark; }
 
   body {
     font-family: var(--font);
@@ -48,8 +95,79 @@
     user-select: none;
   }
 
+  /* キーボードヒント用チップ */
+  kbd {
+    font: 500 10px var(--font);
+    color: var(--text2);
+    background: var(--bg4);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  /* 拡張子バッジ */
+  .ext-badge {
+    flex-shrink: 0;
+    width: 26px; height: 18px;
+    border-radius: 3px;
+    font-size: 8px; font-weight: 700; letter-spacing: 0.02em;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ext-tsx  { background: rgba(88,166,255,0.18);  color: var(--c-tsx);   border: 1px solid rgba(88,166,255,0.25); }
+  .ext-ts   { background: rgba(59,130,246,0.18);  color: var(--c-ts);    border: 1px solid rgba(59,130,246,0.25); }
+  .ext-css  { background: rgba(126,232,250,0.14); color: var(--c-css);   border: 1px solid rgba(126,232,250,0.20); }
+  .ext-md   { background: rgba(118,131,144,0.18); color: var(--c-md);    border: 1px solid rgba(118,131,144,0.25); }
+  .ext-json { background: rgba(227,179,65,0.15);  color: var(--c-json);  border: 1px solid rgba(227,179,65,0.22); }
+  .ext-rs   { background: rgba(240,113,120,0.15); color: var(--c-rs);    border: 1px solid rgba(240,113,120,0.22); }
+  .ext-toml { background: rgba(232,178,80,0.15);  color: var(--c-toml);  border: 1px solid rgba(232,178,80,0.22); }
+  .ext-other{ background: rgba(110,118,129,0.15); color: var(--c-other); border: 1px solid rgba(110,118,129,0.22); }
+
+  /* 共通ボタン */
+  .btn-icon {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text2);
+    width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background var(--dur-hover), color var(--dur-hover);
+  }
+  .btn-icon:hover { background: var(--bg4); color: var(--text); }
+  .btn-icon[aria-pressed="true"] { color: var(--accent-bright); }
+  .btn-icon svg { width: 14px; height: 14px; }
+
+  /* 空状態（結果リスト・カラム・プレビューで共用） */
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-2);
+    padding: 32px 16px;
+    text-align: center;
+  }
+  .empty-icon svg { width: 24px; height: 24px; color: var(--text3); }
+  .empty-title { font-size: 12px; color: var(--text2); }
+  .empty-hint {
+    font-size: 11px;
+    color: var(--text3);
+    display: flex; align-items: center; justify-content: center;
+    gap: 4px; flex-wrap: wrap;
+  }
+
+  /* キーボード操作のフォーカスリング */
+  button:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--accent-bright);
+    outline-offset: -2px;
+  }
+
   /* ═══════════════════════════════════════
-     TITLEBAR
+     SECTION S2: タイトルバー・検索
   ═══════════════════════════════════════ */
   .titlebar {
     height: 36px;
@@ -73,7 +191,6 @@
   .logo-mark { width: 20px; height: 20px; flex-shrink: 0; }
   .logo-name { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: 0.01em; }
 
-  /* メニュー */
   .titlebar-menu {
     display: flex;
     align-items: center;
@@ -91,11 +208,10 @@
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
-    transition: background 0.1s, color 0.1s;
+    transition: background var(--dur-hover), color var(--dur-hover);
   }
   .menu-btn:hover { background: var(--bg4); color: var(--text); }
 
-  /* ハンバーガーボタン（幅不足時） */
   .menu-hamburger {
     display: none;
     background: none;
@@ -110,27 +226,24 @@
     gap: 3px;
     flex-shrink: 0;
     -webkit-app-region: no-drag;
-    transition: background 0.1s, color 0.1s;
+    transition: background var(--dur-hover), color var(--dur-hover);
   }
   .menu-hamburger:hover { background: var(--bg4); color: var(--text); }
   .menu-hamburger span {
     display: block;
-    width: 14px;
-    height: 1.5px;
+    width: 14px; height: 1.5px;
     background: currentColor;
     border-radius: 1px;
   }
 
-  /* ドロップダウン */
   .menu-dropdown {
     display: none;
     position: fixed;
-    top: 36px;
-    left: 0;
+    top: 36px; left: 0;
     background: var(--bg2);
     border: 1px solid var(--border);
     border-top: none;
-    border-radius: 0 0 6px 6px;
+    border-radius: 0 0 var(--r-md) var(--r-md);
     z-index: 1000;
     min-width: 140px;
     box-shadow: 0 8px 20px rgba(0,0,0,0.4);
@@ -139,7 +252,7 @@
   .menu-dropdown.open { display: flex; }
   .menu-dropdown .menu-btn { width: 100%; text-align: left; padding: 0 16px; }
 
-  /* 検索ボックス（中央固定） */
+  /* 検索ボックス（中央固定・デモのトリガー） */
   .titlebar-search-center {
     position: absolute;
     left: 50%;
@@ -150,19 +263,26 @@
     pointer-events: none;
   }
   .search-wrap {
+    position: relative;
     display: flex;
     align-items: center;
     background: var(--bg3);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 0 10px;
     gap: 6px;
-    width: 320px;
-    transition: border-color 0.15s;
+    width: 400px;
+    overflow: hidden;
+    transition: border-color 150ms, box-shadow 150ms;
     pointer-events: all;
   }
-  .search-wrap:focus-within { border-color: var(--accent); }
-  .search-icon { color: var(--text3); font-size: 13px; flex-shrink: 0; line-height: 1; }
+  .search-wrap:hover { border-color: #444c56; }
+  .search-wrap:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(49,109,202,0.25);
+  }
+  .search-icon { color: var(--text3); flex-shrink: 0; display: flex; }
+  .search-icon svg { width: 13px; height: 13px; }
   .search-input {
     flex: 1;
     background: none;
@@ -172,8 +292,25 @@
     font: 400 13px var(--font);
     padding: 5px 0;
     user-select: text;
+    min-width: 0;
   }
   .search-input::placeholder { color: var(--text3); }
+  .search-kbd { flex-shrink: 0; display: flex; gap: 3px; }
+
+  /* 検索中インジケータ（下端2pxのスイープバー。旧 opacity:.7 は廃止） */
+  .search-loadbar {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent-bright), transparent);
+    transform: translateX(-100%);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .search-wrap.loading .search-loadbar {
+    opacity: 1;
+    animation: search-sweep 1s linear infinite;
+  }
 
   /* ウィンドウコントロール */
   .titlebar-winctrls {
@@ -187,28 +324,98 @@
     background: none;
     border: none;
     color: var(--text2);
-    width: 46px;
-    height: 36px;
+    width: 46px; height: 36px;
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.1s, color 0.1s;
+    display: flex; align-items: center; justify-content: center;
+    transition: background var(--dur-hover), color var(--dur-hover);
   }
   .winctrl:hover { background: var(--bg4); color: var(--text); }
   .winctrl.close:hover { background: #c42b1c; color: #fff; }
   .winctrl svg { pointer-events: none; }
 
   /* ═══════════════════════════════════════
-     MAIN
+     SECTION S3: ツールバー・3ペインレイアウト・リサイザー
   ═══════════════════════════════════════ */
-  .main { display: flex; flex: 1; overflow: hidden; }
+  .toolbar {
+    height: 34px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 0 var(--sp-3);
+    flex-shrink: 0;
+  }
+  /* スコープチップ（現在の検索範囲を表示。既定は全体検索） */
+  .scope-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    max-width: 420px;
+    height: 22px;
+    padding: 0 4px 0 8px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    color: var(--text2);
+    font: 400 11px var(--font);
+  }
+  /* 未指定（全体検索）時は枠線を消して控えめに */
+  .scope-chip-all {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text3);
+    padding-right: 8px;
+  }
+  .scope-ico { display: inline-flex; flex-shrink: 0; }
+  .scope-ico svg { width: 12px; height: 12px; }
+  .scope-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    user-select: text;
+  }
+  /* チップ内の解除（×）ボタン */
+  .scope-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px; height: 16px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text3);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background var(--dur-hover), color var(--dur-hover);
+  }
+  .scope-clear svg { width: 11px; height: 11px; }
+  .scope-clear:hover { background: var(--bg5); color: var(--text); }
+  /* スコープ選択（フォルダ限定）ボタン */
+  .scope-pick {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px; height: 24px;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text3);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background var(--dur-hover), color var(--dur-hover), border-color var(--dur-hover);
+  }
+  .scope-pick svg { width: 13px; height: 13px; }
+  .scope-pick:hover { background: var(--bg3); color: var(--text); border-color: var(--border); }
+  .toolbar-spacer { flex: 1; }
 
-  /* 左ペイン */
+  .main { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+
   .left-pane {
     width: var(--left-w);
-    min-width: 200px;
-    max-width: calc(100vw - 280px);
+    min-width: 240px;
+    max-width: 36vw;
     flex-shrink: 0;
     border-right: 1px solid var(--border);
     display: flex;
@@ -216,290 +423,714 @@
     overflow: hidden;
   }
 
-  /* リストヘッダー */
-  .list-header {
-    display: flex;
-    padding: 0 12px;
-    font-size: 11px;
-    color: var(--text3);
+  .preview-pane {
+    width: var(--right-w);
+    min-width: 300px;
+    max-width: 42vw;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
     background: var(--bg2);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    user-select: none;
-  }
-
-  /* 列ラッパー（ヘッダーラベル + リサイザーをまとめる） */
-  .col-wrap {
     display: flex;
-    align-items: stretch;
-    flex-shrink: 0;
+    flex-direction: column;
     overflow: hidden;
   }
-  .col-wrap-name { flex: 1; min-width: 0; overflow: hidden; }
+  body.preview-collapsed .preview-pane,
+  body.preview-collapsed #resizerR { display: none; }
 
-  /* ヘッダーラベル */
-  .col-h {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    padding: 3px 4px 3px 0;
-    cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    min-width: 0;
-    transition: color 0.1s;
-  }
-  .col-h:hover { color: var(--text); }
-  .col-h.sorted { color: var(--text2); }
-  .sort-arrow { font-size: 9px; opacity: 0.8; flex-shrink: 0; }
-
-  /* 列リサイザー（col-wrap の右端に inline で置く） */
-  .col-resizer {
-    width: 4px;
-    flex-shrink: 0;
-    cursor: col-resize;
-    background: transparent;
-    transition: background 0.12s;
-    align-self: stretch;
-  }
-  .col-resizer:hover, .col-resizer.dragging { background: var(--accent); }
-
-  /* ファイルリスト */
-  .file-list { overflow-y: auto; flex: 1; }
-  .file-list::-webkit-scrollbar { width: 6px; }
-  .file-list::-webkit-scrollbar-track { background: transparent; }
-  .file-list::-webkit-scrollbar-thumb { background: var(--bg5); border-radius: 3px; }
-
-  .file-row {
-    display: flex;
-    padding: 4px 12px;
-    cursor: pointer;
-    align-items: center;
-    position: relative;
-    transition: background 0.08s;
-  }
-  .file-row:hover { background: var(--bg3); }
-  .file-row.selected { background: var(--sel-bg); }
-  .file-row.selected::before {
-    content: '';
-    position: absolute;
-    left: 0; top: 0; bottom: 0;
-    width: 2px;
-    background: var(--sel-border);
-    border-radius: 0 1px 1px 0;
-  }
-  .file-row > .file-name { flex: 1; min-width: 0; }
-  .file-row > .folder-col,
-  .file-row > .size-col,
-  .file-row > .date-col { flex-shrink: 0; overflow: hidden; }
-
-  .file-name { display: flex; align-items: center; gap: 6px; overflow: hidden; }
-  .ext-badge {
-    flex-shrink: 0;
-    width: 26px; height: 18px;
-    border-radius: 3px;
-    font-size: 8px; font-weight: 700; letter-spacing: 0.02em;
-    display: flex; align-items: center; justify-content: center;
-    opacity: 0.9;
-  }
-  .ext-tsx  { background: rgba(88,166,255,0.18);  color: var(--c-tsx);   border: 1px solid rgba(88,166,255,0.25); }
-  .ext-ts   { background: rgba(59,130,246,0.18);  color: var(--c-ts);    border: 1px solid rgba(59,130,246,0.25); }
-  .ext-css  { background: rgba(126,232,250,0.14); color: var(--c-css);   border: 1px solid rgba(126,232,250,0.20); }
-  .ext-md   { background: rgba(118,131,144,0.18); color: var(--c-md);    border: 1px solid rgba(118,131,144,0.25); }
-  .ext-json { background: rgba(227,179,65,0.15);  color: var(--c-json);  border: 1px solid rgba(227,179,65,0.22); }
-  .ext-rs   { background: rgba(240,113,120,0.15); color: var(--c-rs);    border: 1px solid rgba(240,113,120,0.22); }
-  .ext-toml { background: rgba(232,178,80,0.15);  color: var(--c-toml);  border: 1px solid rgba(232,178,80,0.22); }
-  .ext-other{ background: rgba(110,118,129,0.15); color: var(--c-other); border: 1px solid rgba(110,118,129,0.22); }
-
-  .file-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); }
-  .folder-col { color: var(--text3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .size-col   { color: var(--text2); font-size: 11px; }
-  .date-col   { color: var(--text2); font-size: 11px; }
-
-  /* ペイン分割リサイザー */
   .resizer {
     width: 4px;
     flex-shrink: 0;
     background: transparent;
     cursor: col-resize;
     z-index: 10;
-    transition: background 0.15s;
+    transition: background 150ms;
   }
   .resizer:hover, .resizer.dragging { background: var(--accent); }
 
-  /* 右ペイン */
-  .right-pane { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 200px; }
-
-  /* パスバー */
-  .path-bar {
-    height: 32px;
-    background: var(--bg2);
-    border-bottom: 1px solid var(--border);
+  /* ═══════════════════════════════════════
+     SECTION S4: 左ペイン結果リスト
+  ═══════════════════════════════════════ */
+  /* リストヘッダー：行の列幅と揃える（score 56px / name flex / size 52px / date 80px） */
+  .list-header {
     display: flex;
     align-items: center;
-    padding: 0 10px;
-    gap: 8px;
+    height: 26px;
+    padding: 0 var(--sp-3);
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text3);
     flex-shrink: 0;
   }
-  .path-label { color: var(--text3); font-size: 11px; white-space: nowrap; }
-  .path-input {
-    flex: 1;
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 3px 8px;
-    font: 400 11px var(--font);
-    color: var(--text2);
-    outline: none;
-    user-select: text;
-  }
-  .path-input:focus { border-color: var(--accent); color: var(--text); }
-  .btn-sm {
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--text2);
-    font: 400 11px var(--font);
-    padding: 3px 10px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.1s, color 0.1s;
-  }
-  .btn-sm:hover { background: var(--bg5); color: var(--text); }
-  .btn-primary {
-    background: var(--accent);
-    border: 1px solid var(--accent);
-    border-radius: 4px;
-    color: #fff;
-    font: 500 11px var(--font);
-    padding: 3px 12px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: filter 0.1s;
-  }
-  .btn-primary:hover { filter: brightness(1.15); }
 
-  /* カラムエクスプローラー */
+  .col-h {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    transition: color var(--dur-hover);
+  }
+  .col-h:hover { color: var(--text); }
+  .col-h.sorted { color: var(--text2); }
+
+  .col-h-score { width: 56px; margin-right: var(--sp-2); justify-content: flex-end; }
+  .col-h-name  { flex: 1; min-width: 0; }
+  /* フォルダ列ヘッダー: コンパクト時のみ表示。行(.row-folder-col)と flex 規則・padding を
+     完全一致させ、ヘッダーラベルとパス文字列の開始位置を揃える */
+  .col-h-folder { display: none; justify-content: flex-start; }
+  .col-h-size,
+  .col-h-date  { display: none; justify-content: flex-end; }
+  .left-pane.w-md .col-h-size { display: flex; width: 52px; }
+  .left-pane.w-lg .col-h-date { display: flex; width: 80px; white-space: nowrap; }
+
+  /* コンパクト時: 名前列ヘッダーを行 .row-main と、フォルダ列ヘッダーを .row-folder-col と一致させる。
+     flex-basis を 0 に統一し、ヘッダー「名前」とデータ行のコンテンツ幅の差で列開始位置がずれるのを防ぐ */
+  .left-pane.view-compact .col-h-name {
+    flex: 1 1 0;
+    min-width: 120px;
+  }
+  .left-pane.view-compact .col-h-folder {
+    display: flex;
+    flex: 1 1000 0;
+    min-width: 0;
+    padding-left: var(--sp-2);
+  }
+
+  .sort-ico {
+    display: inline-flex;
+    width: 8px;
+    height: 8px;
+    flex-shrink: 0;
+    transition: transform 120ms var(--ease-out);
+  }
+  .sort-ico svg { width: 8px; height: 8px; }
+  .col-h.sorted.desc .sort-ico { transform: rotate(180deg); }
+
+  /* ファイルリスト */
+  .file-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+  .file-list::-webkit-scrollbar { width: 6px; }
+  .file-list::-webkit-scrollbar-track { background: transparent; }
+  .file-list::-webkit-scrollbar-thumb { background: var(--bg5); border-radius: 3px; }
+
+  .file-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 40px;
+    flex-shrink: 0;
+    padding: 0 var(--sp-3);
+    cursor: pointer;
+    transition:
+      opacity var(--dur-enter) var(--ease-out),
+      transform var(--dur-enter) var(--ease-out),
+      background var(--dur-hover);
+  }
+
+  /* 行の入場アニメーション */
+  .file-row.pre {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  /* 左端ヒートバー：ヒートマップ色をJSが --heat-bg に注入 */
+  .row-heatbar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--heat-bg, transparent);
+    opacity: 0.9;
+  }
+
+  /* 一致スコア列 */
+  .row-score {
+    flex-shrink: 0;
+    width: 56px;
+    margin-right: var(--sp-2);
+  }
+  .row-score-num {
+    display: block;
+    font-size: 11px;
+    color: var(--text2);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .row-score-bar {
+    height: 3px;
+    width: 100%;
+    margin-top: 3px;
+    background: var(--bg4);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .row-score-fill {
+    height: 100%;
+    background: var(--heat-bg, var(--accent));
+    transform-origin: left;
+    border-radius: 2px;
+  }
+
+  /* 名前・フォルダ（2行構成） */
+  .row-main { flex: 1; min-width: 0; }
+  .row-name { display: flex; align-items: center; gap: 6px; overflow: hidden; }
+  .row-file {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .row-folder {
+    margin-top: 1px;
+    font-size: 10px;
+    color: var(--text3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* フォルダ列（コンパクトモードのみ表示）
+     flex-shrink を名前列より桁違いに大きくし、ペイン縮小時はフォルダ列が
+     先に縮みきってから名前列が縮むようにする（基準幅 auto で縮小量に重みを持たせる） */
+  .row-folder-col {
+    display: none;
+    flex: 1 1000 0;
+    min-width: 0;
+    font-size: 10px;
+    color: var(--text3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    padding-left: var(--sp-2);
+  }
+  .left-pane.view-compact .row-folder-col { display: block; }
+
+  /* サイズ・更新日時（ペイン幅に応じて表示） */
+  .row-size,
+  .row-date {
+    display: none;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text2);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .left-pane.w-md .row-size { display: block; width: 52px; }
+  .left-pane.w-lg .row-date { display: block; width: 80px; white-space: nowrap; }
+
+  /* 状態 */
+  .file-row:hover { background: var(--hover-bg); }
+  .file-row.selected { background: var(--sel-bg); }
+  .file-row.selected:hover { background: var(--sel-bg-hover); }
+  .file-row.selected .row-heatbar { background: var(--accent-bright); }
+  .file-row.selected .row-file { color: #fff; }
+  .file-row:active { background: rgba(49,109,202,0.18); }
+  .file-row:focus-visible {
+    outline: 2px solid var(--accent-bright);
+    outline-offset: -2px;
+  }
+
+  /* スケルトン行（ロード中） */
+  .sk-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    height: 40px;
+    flex-shrink: 0;
+    padding: 0 var(--sp-3);
+  }
+  .sk-block {
+    position: relative;
+    overflow: hidden;
+    background: var(--bg3);
+    border-radius: 4px;
+  }
+  .sk-score { width: 40px; height: 10px; }
+  .sk-badge { width: 26px; height: 16px; }
+  .sk-line  { flex: 1; height: 10px; }
+
+  /* シマーアニメーション */
+  .sk-block::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(177,186,196,0.08), transparent);
+    transform: translateX(-100%);
+    animation: sk-shimmer 1.2s infinite;
+  }
+  @keyframes sk-shimmer {
+    to { transform: translateX(200%); }
+  }
+
+  /* ═══════════════════════════════════════
+     SECTION S5: 中央カラムエクスプローラー＋ヒートマップ
+  ═══════════════════════════════════════ */
+  .center-pane {
+    flex: 1;
+    min-width: 280px;
+    display: flex;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
   .columns-scroll {
     flex: 1;
     display: flex;
+    gap: var(--sp-2);
+    padding: var(--sp-3);
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 10px;
-    gap: 1px;
-    background: var(--bg);
   }
-  .columns-scroll::-webkit-scrollbar { height: 5px; }
+  .columns-scroll::-webkit-scrollbar { height: 6px; }
+  .columns-scroll::-webkit-scrollbar-track { background: transparent; }
   .columns-scroll::-webkit-scrollbar-thumb { background: var(--bg5); border-radius: 3px; }
 
+  /* カラムパネル */
   .col-panel {
     flex-shrink: 0;
-    width: 200px;
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    width: 208px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    background: var(--bg2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    transition:
+      opacity var(--dur-panel) var(--ease-out),
+      transform var(--dur-panel) var(--ease-out);
   }
-  .col-panel.detail-card { width: 220px; }
+  .col-panel.pre {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  .col-panel.in {
+    opacity: 1;
+    transform: none;
+  }
 
+  /* カラムヘッダー */
   .col-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     padding: 4px 10px;
-    font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
-    color: var(--text3);
     background: var(--bg3);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
+    color: var(--text3);
     flex-shrink: 0;
   }
-  .col-body { overflow-y: auto; flex: 1; }
+  .col-depth {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    background: var(--bg4);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text3);
+    flex-shrink: 0;
+  }
+  .col-head-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* カラム本体 */
+  .col-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+  }
   .col-body::-webkit-scrollbar { width: 4px; }
+  .col-body::-webkit-scrollbar-track { background: transparent; }
   .col-body::-webkit-scrollbar-thumb { background: var(--bg5); border-radius: 2px; }
 
+  /* カラムアイテム */
   .col-item {
     position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 10px;
+    height: 28px;
+    padding: 0 10px;
     cursor: pointer;
-    overflow: hidden;
-    transition: background 0.08s, color 0.1s;
-    color: var(--text2);
+    transition:
+      opacity var(--dur-enter) var(--ease-out),
+      transform var(--dur-enter) var(--ease-out);
   }
-  .col-item:hover  { background: var(--bg4); color: var(--text); }
-  .col-item.active { background: var(--sel-bg); color: var(--text); }
-  .col-item.skip   { cursor: default; }
 
-  /* ヒートマップ背景オーバーレイ：スコア(0.0〜1.0) → hsl(220,80%,L%) を --heat-bg に注入し、
-     opacity は --heat-opacity * 0.18 で一律スケール（design.md §3.5） */
+  /* 入場アニメーション（transition-delayはJSが注入） */
+  .col-item.pre {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  .col-item.in {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* ヒートマップ背景オーバーレイ：z-index:0（最背面）。
+     スコア → 輝度は JS の heatBg() が hsl(220,80%, 20%+score*60%) で算出 */
   .heat-overlay {
     position: absolute;
     inset: 0;
+    z-index: 0;
     background: var(--heat-bg, transparent);
-    opacity: calc(var(--heat-opacity, 0) * 0.18);
+    opacity: calc(var(--heat-opacity, 0) * var(--heat-alpha-max));
+    transition: opacity var(--dur-panel) var(--ease-out);
     pointer-events: none;
   }
 
-  /* アクティブ行の左端パスライン */
-  .col-active-line {
+  /* hover層：z-index:1。ヒート点灯済みでもhoverを視認できるよう疑似要素で重ねる */
+  .col-item::after {
+    content: '';
     position: absolute;
-    left: 0; top: 0; bottom: 0;
-    width: 2px;
-    background: var(--accent);
-    transform-origin: top;
-  }
-
-  .col-icon    { font-size: 12px; z-index: 1; flex-shrink: 0; display: flex; align-items: center; }
-  .col-name    { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); z-index: 1; }
-  .col-chevron { color: var(--text3); font-size: 10px; z-index: 1; flex-shrink: 0; }
-  /* スコアバッジ：found のみ表示。背景輝度に応じて読みやすい文字色を --heat-text で切替 */
-  .col-score {
-    flex-shrink: 0;
-    font-size: 10px;
-    color: var(--heat-text, var(--text3));
-    font-variant-numeric: tabular-nums;
+    inset: 0;
     z-index: 1;
+    background: transparent;
+    pointer-events: none;
+    transition: background var(--dur-hover);
+  }
+  .col-item:hover::after {
+    background: rgba(255,255,255,0.055);
   }
 
-  .detail-card .col-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-  .detail-filename { font-size: 13px; font-weight: 600; color: var(--text); word-break: break-all; }
-  .detail-table { display: flex; flex-direction: column; gap: 5px; }
-  .detail-row   { display: flex; gap: 8px; align-items: baseline; }
-  .detail-key   { width: 44px; font-size: 10px; color: var(--text3); flex-shrink: 0; }
-  .detail-val   { font-size: 11px; color: var(--text2); }
-
-  /* AIガイドパスライン：score >= 0.8 のファイル選択時に光るライン（design.md §3.5） */
-  .guide-path-glow {
-    height: 2px;
-    border-radius: 1px;
-    margin-top: 4px;
-    background: linear-gradient(90deg, var(--accent), #58a6ff, var(--accent));
-    box-shadow: 0 0 6px 1px var(--accent);
-    transform-origin: left;
+  /* 左端ヒートバー：面のopacityでは潰れる低スコア帯をフル彩度の輝度差で判別させる */
+  .item-heatbar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 2;
+    width: 2px;
+    background: var(--heat-bg, transparent);
+    opacity: calc(var(--heat-opacity, 0) * 0.9);
   }
 
-  /* 空状態：検索結果なし / 探索カラム未生成 */
-  .empty-state {
+  /* コンテンツ：z-index:2（最前面） */
+  .col-icon,
+  .col-name,
+  .col-chevron,
+  .col-score,
+  .col-connector {
+    position: relative;
+    z-index: 2;
+  }
+
+  .col-icon {
     display: flex;
     align-items: center;
-    justify-content: center;
-    padding: 32px;
-    color: var(--text3);
-    font-size: 12px;
-  }
-  .col-panel.phase4-placeholder .col-body {
-    padding: 16px;
+    flex-shrink: 0;
     color: var(--text2);
-    font-size: 11px;
-    line-height: 1.7;
+  }
+  .col-icon svg { width: 13px; height: 13px; }
+  .col-item .col-icon.ico-folder { color: var(--folder); }
+  .col-item .col-icon.ico-code   { color: var(--c-tsx); }
+
+  .col-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  /* ステータスバー */
+  .col-chevron {
+    flex-shrink: 0;
+    color: var(--text3);
+    display: flex;
+  }
+  .col-chevron svg { width: 10px; height: 10px; }
+
+  /* スコアpill：found のみ。フル不透明背景＋輝度に応じた2値文字色で可読性を確保 */
+  .col-score {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border-radius: var(--r-pill);
+    background: var(--heat-bg, var(--bg4));
+    color: var(--heat-text, var(--text2));
+    font-size: 10px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    transition:
+      opacity var(--dur-enter) var(--ease-out),
+      transform var(--dur-enter) var(--ease-out);
+  }
+  .col-score.pre {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+
+  /* アクティブパスのコネクタ：active時のみ表示 */
+  .col-connector {
+    display: none;
+    flex-shrink: 0;
+    color: var(--accent-bright);
+    filter: drop-shadow(0 0 3px rgba(88,166,255,0.8));
+  }
+  .col-connector svg { width: 10px; height: 10px; }
+  .col-item.active .col-connector { display: flex; }
+
+  /* 状態 */
+  .col-item.active {
+    box-shadow: inset 2px 0 0 var(--accent-bright), inset 0 0 0 1px rgba(88,166,255,0.35);
+  }
+  .col-item.active .col-name {
+    color: #fff;
+    font-weight: 500;
+  }
+
+  /* A*が掘らなかった（skipped）項目は減衰表示。ただしフォルダは手動で潜れるよう
+     chevron とポインタを残す（Finder型ナビ）。skipped ファイルのみ dead-end 扱い。 */
+  .col-item.skip .col-icon,
+  .col-item.skip .col-name,
+  .col-item.skip .col-chevron {
+    opacity: 0.55;
+  }
+  .col-item.skip:hover .col-icon,
+  .col-item.skip:hover .col-name,
+  .col-item.skip:hover .col-chevron {
+    opacity: 0.85;
+  }
+
+  .col-item:focus-visible {
+    outline: 2px solid var(--accent-bright);
+    outline-offset: -2px;
+  }
+
+  /* AIガイドパスライン：確定パス選択時に発光 */
+  .guide-path-glow {
+    height: 2px;
+    margin: 4px 10px 6px;
+    border-radius: 1px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-bright), var(--accent));
+    box-shadow: 0 0 6px 1px var(--accent);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 320ms var(--ease-out);
+  }
+  .guide-path-glow.on {
+    transform: scaleX(1);
+    animation: glow-pulse 600ms ease-out 1;
+  }
+  @keyframes glow-pulse {
+    0%   { box-shadow: 0 0 14px 3px var(--accent-bright); }
+    100% { box-shadow: 0 0 6px 1px var(--accent); }
+  }
+
+  /* ═══════════════════════════════════════
+     SECTION S6: プレビューペイン
+  ═══════════════════════════════════════ */
+  .preview-header {
+    display: flex;
+    gap: var(--sp-2);
+    align-items: flex-start;
+    padding: 10px 12px 6px;
+    flex-shrink: 0;
+  }
+  .preview-title { flex: 1; min-width: 0; }
+  .preview-filename {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    word-break: break-all;
+  }
+  .preview-path {
+    margin-top: 2px;
+    font-size: 10px;
+    color: var(--text3);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .preview-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 12px 10px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .meta-chip {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--bg3);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-pill);
+    padding: 2px 8px;
+  }
+  .meta-k { font-size: 10px; color: var(--text3); }
+  .meta-v { font-size: 11px; color: var(--text2); font-variant-numeric: tabular-nums; }
+  .score-pill {
+    background: var(--heat-bg, var(--bg4));
+    color: var(--heat-text, var(--text2));
+    border-radius: var(--r-pill);
+    padding: 0 6px;
+    font-size: 10px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* AIガイド表示（score >= 0.8 のファイルのみ） */
+  .preview-guide {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px 0;
+    color: var(--accent-bright);
+    font-size: 11px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .preview-guide svg {
+    width: 12px; height: 12px;
+    filter: drop-shadow(0 0 3px rgba(88,166,255,0.6));
+    flex-shrink: 0;
+  }
+  .preview-guide .guide-line {
+    flex: 1;
+    height: 2px;
+    border-radius: 1px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-bright), transparent);
+    box-shadow: 0 0 6px rgba(49,109,202,0.6);
+  }
+
+  .preview-body {
+    flex: 1;
+    overflow: auto;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+  }
+  .preview-body::-webkit-scrollbar { width: 6px; height: 6px; }
+  .preview-body::-webkit-scrollbar-track { background: transparent; }
+  .preview-body::-webkit-scrollbar-thumb { background: var(--bg5); border-radius: 3px; }
+
+  /* プレビュー内容の入れ替えフェード（header〜truncバナーまでを縦flexで包む） */
+  .pv-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    opacity: 1;
+    transition: opacity 160ms var(--ease-out);
+  }
+  .pv-view.pre { opacity: 0; }
+
+  /* コードビュー */
+  .pv-code {
+    font: 12px/1.6 var(--font-mono);
+    padding: 8px 0;
+    user-select: text;
+  }
+  .pv-line { display: flex; }
+  .pv-line:hover { background: rgba(177,186,196,0.04); }
+  .pv-ln {
+    width: 40px;
+    flex-shrink: 0;
+    text-align: right;
+    padding-right: 12px;
+    color: var(--text3);
+    user-select: none;
+    font-variant-numeric: tabular-nums;
+    position: sticky;
+    left: 0;
+    background: var(--bg);
+  }
+  .pv-tx { white-space: pre; padding-right: 16px; }
+
+  /* 簡易シンタックスハイライト（GitHub Dark 準拠・全色 bg 上 4.5:1 以上） */
+  .tok-kw   { color: #ff7b72; }
+  .tok-str  { color: #a5d6ff; }
+  .tok-fn   { color: #d2a8ff; }
+  .tok-num  { color: #79c0ff; }
+  .tok-type { color: #ffa657; }
+  .tok-cm   { color: #8b949e; font-style: italic; }
+
+  /* Markdownビュー（レンダリング済みHTMLを静的表示） */
+  .pv-md {
+    padding: 14px 16px;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text);
+    user-select: text;
+  }
+  .pv-md h1 {
+    font-size: 16px; font-weight: 600;
+    border-bottom: 1px solid var(--border-subtle);
+    padding-bottom: 6px;
+    margin-bottom: 10px;
+  }
+  .pv-md h2 { font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+  .pv-md p { margin: 6px 0; color: var(--text2); }
+  .pv-md ul { padding-left: 18px; margin: 6px 0; color: var(--text2); }
+  .pv-md li { margin: 3px 0; }
+  .pv-md strong { color: var(--text); }
+  .pv-md code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--bg3);
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+    padding: 0 4px;
+    color: var(--text);
+  }
+  .pv-md pre {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--bg2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    padding: 10px 12px;
+    margin: 8px 0;
+    overflow-x: auto;
+    color: var(--text);
+    white-space: pre;
+  }
+
+  /* 非対応形式 */
+  .pv-format { font-family: var(--font-mono); color: var(--text3); font-size: 11px; }
+
+  /* truncated バナー（backend.md §6: 先頭64KBのみ） */
+  .preview-trunc {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: rgba(210,153,34,0.12);
+    border-top: 1px solid rgba(210,153,34,0.4);
+    color: var(--warn);
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+  .preview-trunc svg { width: 12px; height: 12px; flex-shrink: 0; }
+
+  /* プレビューローディング（選択デバウンス150msの間に表示） */
+  .pv-skel {
+    padding: 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .pv-skel .sk-block { height: 10px; }
+
+  /* ═══════════════════════════════════════
+     SECTION S7: ステータスバー
+  ═══════════════════════════════════════ */
   .statusbar {
-    height: 20px;
+    height: 24px;
     background: var(--bg2);
     border-top: 1px solid var(--border);
     display: flex;
@@ -510,36 +1141,143 @@
     font-size: 11px;
     color: var(--text3);
   }
-  .status-dot  { width: 6px; height: 6px; border-radius: 50%; background: #3fb950; flex-shrink: 0; transition: background 0.2s; }
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    flex-shrink: 0;
+    transition: background 200ms;
+  }
   .status-dot.loading { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
-  .status-text { color: var(--text2); }
+  .status-phase { color: var(--text2); white-space: nowrap; }
+  .status-note { color: var(--text3); white-space: nowrap; }
 
+  .status-log {
+    font: 10px/1 var(--font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .status-log .entry { display: inline-block; transition: opacity var(--dur-exit) var(--ease-out), transform var(--dur-exit) var(--ease-out); }
+  .status-log .entry.pre { opacity: 0; transform: translateY(3px); }
+  .log-open  { color: var(--accent-bright); }
+  .log-skip  { color: var(--text3); }
+  .log-found { color: var(--success); }
+  .log-info  { color: var(--text2); }
+
+  .status-spacer { flex: 1; }
+  .status-counts { white-space: nowrap; color: var(--text3); }
+  .status-counts b { color: var(--text2); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .status-ms {
+    font-variant-numeric: tabular-nums;
+    color: var(--text2);
+    min-width: 48px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .status-hints { display: flex; gap: 10px; white-space: nowrap; align-items: center; }
+  .status-hints .hint { display: flex; gap: 3px; align-items: center; }
+
+  /* ═══════════════════════════════════════
+     SECTION S8: keyframes・補足・reduced-motion
+  ═══════════════════════════════════════ */
   @keyframes pulse {
     0%, 100% { opacity: 1; }
-    50%       { opacity: 0.4; }
+    50%      { opacity: 0.4; }
+  }
+  @keyframes search-sweep {
+    to { transform: translateX(100%); }
   }
 
-  /* 検索ローディング中の微妙なフェード */
-  .search-wrap[data-loading="true"] { opacity: 0.7; }
+  /* ソート対象外の列は矢印を隠す（S4補足） */
+  .col-h:not(.sorted) .sort-ico { opacity: 0; }
 
-  .ico-folder    { color: var(--folder); }
-  .ico-file-tsx  { color: var(--c-tsx); }
-  .ico-file-ts   { color: var(--c-ts); }
-
-  /* フォーカスリング（キーボード操作用） */
-  .col-h:focus-visible,
-  .winctrl:focus-visible,
-  .file-row:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-  }
-
-  /* アクセシビリティ: prefers-reduced-motion */
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
     }
+  }
+
+  /* ═══════════════════════════════════════
+     SECTION S9: 左ペイン表示モード（コンパクト / 標準 / 詳細）
+  ═══════════════════════════════════════ */
+
+  /* コンパクト: 1行 28px */
+  .left-pane.view-compact .file-row   { height: 28px; }
+  .left-pane.view-compact .sk-row     { height: 28px; }
+  .left-pane.view-compact .row-folder { display: none; }
+  /* 名前列は flex-basis を 0 に揃え（ヘッダーの col-h-name と同一）、min-width で下限を確保。
+     フォルダ列が先に 0 まで縮みきってから名前列が縮む。 */
+  .left-pane.view-compact .row-main   { flex: 1 1 0; min-width: 120px; }
+
+  /* 詳細: 44px + size/date 常時表示（ResizeObserver の w-md/w-lg を !important で上書き） */
+  .left-pane.view-detail .file-row    { height: 44px; }
+  .left-pane.view-detail .sk-row      { height: 44px; }
+  .left-pane.view-detail .row-size,
+  .left-pane.view-detail .row-date    { display: block !important; }
+  .left-pane.view-detail .col-h-size,
+  .left-pane.view-detail .col-h-date  { display: flex  !important; }
+
+  /* ── 表示ポップアップ ── */
+  .view-popup {
+    position: fixed; z-index: 1100;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.3);
+    min-width: 210px; padding: var(--sp-1) 0 var(--sp-2);
+    transform: scale(0.96) translateY(-4px); opacity: 0; pointer-events: none;
+    transition: opacity var(--dur-enter) var(--ease-out),
+                transform var(--dur-enter) var(--ease-out);
+  }
+  .view-popup.open { transform: scale(1) translateY(0); opacity: 1; pointer-events: auto; }
+
+  .view-popup-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--text3);
+    padding: var(--sp-1) var(--sp-3) var(--sp-2); user-select: none;
+  }
+  .view-popup-item {
+    position: relative;
+    display: grid;
+    grid-template-columns: 16px 44px 1fr;
+    grid-template-rows: auto auto;
+    grid-template-areas: "radio preview name" "radio preview desc";
+    align-items: center; column-gap: var(--sp-2);
+    width: 100%; padding: var(--sp-2) var(--sp-3);
+    background: none; border: none; color: var(--text);
+    font: 400 12px var(--font); cursor: pointer; text-align: left;
+    transition: background var(--dur-hover);
+  }
+  .view-popup-item:hover,
+  .view-popup-item.focused { background: var(--hover-bg); }
+  .view-popup-item:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -2px; }
+
+  .view-popup-radio {
+    grid-area: radio; align-self: center;
+    width: 12px; height: 12px; border-radius: var(--r-pill);
+    border: 1.5px solid var(--border);
+    transition: border-color var(--dur-hover), background var(--dur-hover);
+  }
+  .view-popup-item[aria-checked="true"] .view-popup-radio {
+    border-color: var(--accent-bright); background: var(--accent-bright);
+    box-shadow: inset 0 0 0 2.5px var(--bg2);
+  }
+  .view-popup-preview {
+    grid-area: preview; width: 40px; height: auto; color: var(--text2);
+    border: 1px solid var(--border-subtle); border-radius: var(--r-sm);
+    background: var(--bg3); padding: 1px;
+  }
+  .view-popup-item[aria-checked="true"] .view-popup-preview { border-color: var(--accent); }
+  .view-popup-name { grid-area: name; font-weight: 500; font-size: 12px; color: var(--text); }
+  .view-popup-item[aria-checked="true"] .view-popup-name { color: var(--accent-bright); }
+  .view-popup-desc { grid-area: desc; font-size: 10px; color: var(--text3); margin-top: 1px; }
+  .view-popup-item[aria-checked="true"]::before {
+    content: ''; position: absolute;
+    left: 0; top: 4px; bottom: 4px; width: 2px;
+    background: var(--accent-bright); border-radius: 1px;
   }
 </style>
 </head>
@@ -550,31 +1288,32 @@
 
   <div class="titlebar-logo">
     <svg class="logo-mark" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="9" y="13" width="2" height="4" rx="0.5" fill="#8b949e"/>
-      <polygon points="10,2 16,9 4,9"   fill="#3fb950" opacity="0.9"/>
-      <polygon points="10,5 15,11 5,11" fill="#2ea043" opacity="0.85"/>
-      <polygon points="10,8 14,13 6,13" fill="#238636" opacity="0.8"/>
-      <circle cx="14" cy="14" r="3.5" stroke="#316dca" stroke-width="1.5" fill="none"/>
-      <line x1="16.5" y1="16.5" x2="18.5" y2="18.5" stroke="#316dca" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="10" y1="5.5" x2="10" y2="9" stroke="#58677a" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="10" y1="9" x2="5.5" y2="14" stroke="#58677a" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="10" y1="9" x2="14.5" y2="14" stroke="#58a6ff" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="10" cy="4.5" r="2" fill="#3fb950"/>
+      <circle cx="5.5" cy="14.5" r="1.6" fill="#58677a"/>
+      <circle cx="14.5" cy="15" r="3" stroke="#316dca" stroke-width="1.5" fill="none"/>
+      <circle cx="14.5" cy="15" r="1.2" fill="#58a6ff"/>
     </svg>
   </div>
 
   <div class="titlebar-menu" id="titlebarMenu">
     <button class="menu-btn">ファイル</button>
     <button class="menu-btn">編集</button>
-    <button class="menu-btn">表示</button>
+    <button class="menu-btn" id="menuBtnView" aria-haspopup="true" aria-expanded="false">表示</button>
     <button class="menu-btn">検索</button>
     <button class="menu-btn">ブックマーク</button>
     <button class="menu-btn">ツール</button>
     <button class="menu-btn">ヘルプ</button>
   </div>
-  <button class="menu-hamburger" id="menuHamburger" onclick="toggleMenuDropdown()">
+  <button class="menu-hamburger" id="menuHamburger">
     <span></span><span></span><span></span>
   </button>
   <div class="menu-dropdown" id="menuDropdown">
     <button class="menu-btn">ファイル</button>
     <button class="menu-btn">編集</button>
-    <button class="menu-btn">表示</button>
+    <button class="menu-btn" id="menuBtnViewH" aria-haspopup="true" aria-expanded="false">表示</button>
     <button class="menu-btn">検索</button>
     <button class="menu-btn">ブックマーク</button>
     <button class="menu-btn">ツール</button>
@@ -582,12 +1321,11 @@
   </div>
 
   <div class="titlebar-search-center">
-    <div class="search-wrap">
-      <svg class="search-icon" width="13" height="13" viewBox="0 0 16 16" fill="none">
-        <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.5"/>
-        <line x1="10" y1="10" x2="14" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-      </svg>
+    <div class="search-wrap" id="searchWrap">
+      <span class="search-icon" id="searchIcon"></span>
       <input class="search-input" value="Reactのボタンコンポーネント" id="searchInput" placeholder="ファイルを検索…">
+      <span class="search-kbd" id="searchKbd"><kbd>Ctrl</kbd><kbd>K</kbd></span>
+      <span class="search-loadbar"></span>
     </div>
   </div>
 
@@ -608,440 +1346,1350 @@
 
 </div>
 
-<!-- ══════════════ MAIN ══════════════ -->
+<!-- ══════════════ TOOLBAR（探索スコープのブレッドクラム） ══════════════ -->
+<div class="toolbar" role="navigation" aria-label="探索スコープ">
+  <!-- 既定は全体検索。スコープ指定時のみパスチップを表示し、× で全体へ戻す -->
+  <span class="scope-chip scope-chip-all" id="scopeChip" title="ドライブ全体を検索中">
+    <span class="scope-ico" id="scopeIco"></span>
+    <span class="scope-text" id="scopeText">全体</span>
+    <button class="scope-clear" id="scopeClear" type="button" title="全体検索に戻す" aria-label="スコープを解除して全体検索に戻す" hidden></button>
+  </span>
+  <button class="scope-pick" id="scopePick" type="button" title="検索範囲をフォルダに限定" aria-label="検索範囲をフォルダに限定"></button>
+  <div class="toolbar-spacer"></div>
+  <button class="btn-icon" id="previewToggle" title="プレビュー切替 (Ctrl+P)" aria-pressed="true"></button>
+</div>
+
+<!-- ══════════════ MAIN（3ペイン） ══════════════ -->
 <div class="main">
 
-  <!-- 左ペイン -->
+  <!-- 左: 検索結果リスト -->
   <div class="left-pane" id="leftPane">
     <div class="list-header">
-      <!-- 名前列（flex:1、リサイザーなし） -->
-      <div class="col-wrap col-wrap-name">
-        <div class="col-h sorted" id="col-h-name" onclick="sortBy('name')">
-          <span>名前</span><span class="sort-arrow">↑</span>
-        </div>
-      </div>
-      <!-- フォルダ列 + 右端リサイザー -->
-      <div class="col-wrap" id="col-wrap-folder" style="width:150px">
-        <div class="col-h" id="col-h-folder" onclick="sortBy('folder')"><span>フォルダ</span></div>
-        <div class="col-resizer" data-resizer="folder"></div>
-      </div>
-      <!-- サイズ列 + 右端リサイザー -->
-      <div class="col-wrap" id="col-wrap-size" style="width:60px">
-        <div class="col-h" id="col-h-size" onclick="sortBy('size')"><span>サイズ</span></div>
-        <div class="col-resizer" data-resizer="size"></div>
-      </div>
-      <!-- 更新日時列 + 右端リサイザー -->
-      <div class="col-wrap" id="col-wrap-date" style="width:86px">
-        <div class="col-h" id="col-h-date" onclick="sortBy('date')"><span>更新日時</span></div>
-        <div class="col-resizer" data-resizer="date"></div>
-      </div>
+      <button class="col-h col-h-score sorted desc" data-sort="score">一致<span class="sort-ico"></span></button>
+      <button class="col-h col-h-name" data-sort="name">名前<span class="sort-ico"></span></button>
+      <button class="col-h col-h-folder" data-sort="folder">フォルダ<span class="sort-ico"></span></button>
+      <button class="col-h col-h-size" data-sort="size">サイズ<span class="sort-ico"></span></button>
+      <button class="col-h col-h-date" data-sort="date">更新日時<span class="sort-ico"></span></button>
     </div>
-
-    <div class="file-list">
-
-      <div class="file-row" onclick="selRow(this)">
-        <div class="file-name"><span class="ext-badge ext-css">CSS</span><span class="file-text">button.css</span></div>
-        <div class="folder-col rc-folder">src\styles</div>
-        <div class="size-col rc-size">0.9 KB</div>
-        <div class="date-col rc-date">2026-06-01</div>
-      </div>
-
-      <div class="file-row" onclick="selRow(this)">
-        <div class="file-name"><span class="ext-badge ext-md">MD</span><span class="file-text">button.md</span></div>
-        <div class="folder-col rc-folder">docs\components</div>
-        <div class="size-col rc-size">1.5 KB</div>
-        <div class="date-col rc-date">2026-05-20</div>
-      </div>
-
-      <div class="file-row" onclick="selRow(this)">
-        <div class="file-name"><span class="ext-badge ext-tsx">TSX</span><span class="file-text">Button.test.tsx</span></div>
-        <div class="folder-col rc-folder">tests\components</div>
-        <div class="size-col rc-size">4.1 KB</div>
-        <div class="date-col rc-date">2026-06-05</div>
-      </div>
-
-      <div class="file-row" onclick="selRow(this)">
-        <div class="file-name"><span class="ext-badge ext-tsx">TSX</span><span class="file-text">Button.tsx</span></div>
-        <div class="folder-col rc-folder">src\components\Button</div>
-        <div class="size-col rc-size">2.4 KB</div>
-        <div class="date-col rc-date">2026-06-08</div>
-      </div>
-
-      <div class="file-row selected" onclick="selRow(this)">
-        <div class="file-name"><span class="ext-badge ext-tsx">TSX</span><span class="file-text">ButtonGroup.tsx</span></div>
-        <div class="folder-col rc-folder">src\components\Button</div>
-        <div class="size-col rc-size">3.2 KB</div>
-        <div class="date-col rc-date">2026-06-06</div>
-      </div>
-
-      <div class="file-row" onclick="selRow(this)">
-        <div class="file-name"><span class="ext-badge ext-tsx">TSX</span><span class="file-text">ButtonIcon.tsx</span></div>
-        <div class="folder-col rc-folder">src\components\Button</div>
-        <div class="size-col rc-size">1.3 KB</div>
-        <div class="date-col rc-date">2026-06-03</div>
-      </div>
-
-      <div class="file-row" onclick="selRow(this)">
-        <div class="file-name"><span class="ext-badge ext-ts">TS</span><span class="file-text">index.ts</span></div>
-        <div class="folder-col rc-folder">src\components\Button</div>
-        <div class="size-col rc-size">0.2 KB</div>
-        <div class="date-col rc-date">2026-06-08</div>
-      </div>
-
-      <div class="file-row" onclick="selRow(this)">
-        <div class="file-name"><span class="ext-badge ext-tsx">TSX</span><span class="file-text">ModalButton.tsx</span></div>
-        <div class="folder-col rc-folder">src\components\Modal</div>
-        <div class="size-col rc-size">2.0 KB</div>
-        <div class="date-col rc-date">2026-05-28</div>
-      </div>
-
-      <div class="file-row" onclick="selRow(this)">
-        <div class="file-name"><span class="ext-badge ext-tsx">TSX</span><span class="file-text">NavButton.tsx</span></div>
-        <div class="folder-col rc-folder">src\components\Nav</div>
-        <div class="size-col rc-size">1.8 KB</div>
-        <div class="date-col rc-date">2026-05-30</div>
-      </div>
-
-      <div class="file-row" onclick="selRow(this)">
-        <div class="file-name"><span class="ext-badge ext-ts">TS</span><span class="file-text">useButton.ts</span></div>
-        <div class="folder-col rc-folder">src\hooks</div>
-        <div class="size-col rc-size">1.1 KB</div>
-        <div class="date-col rc-date">2026-06-07</div>
-      </div>
-
-    </div>
+    <div class="file-list" id="fileList" role="listbox" aria-label="検索結果"></div>
   </div>
 
-  <!-- ペイン分割リサイザー -->
-  <div class="resizer" id="resizer"></div>
+  <div class="resizer" id="resizerL"></div>
 
-  <!-- 右ペイン -->
-  <div class="right-pane" id="rightPane">
-
-    <div class="path-bar">
-      <span class="path-label">ルート</span>
-      <input class="path-input" value="C:\src\">
-      <button class="btn-sm">参照</button>
-      <button class="btn-primary">適用</button>
-    </div>
-
-    <div class="columns-scroll">
-
-      <div class="col-panel">
-        <div class="col-head">ルート</div>
-        <div class="col-body">
-          <div class="col-item active" style="--heat-bg: hsl(220,80%,77%); --heat-opacity: 1; --heat-text: hsl(220,15%,12%);">
-            <div class="heat-overlay"></div>
-            <div class="col-active-line"></div>
-            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
-            <span class="col-name">src/</span>
-            <span class="col-chevron">›</span>
-            <span class="col-score">★0.95</span>
-          </div>
-          <div class="col-item skip" style="--heat-bg: hsl(220,80%,38%); --heat-opacity: 1;">
-            <div class="heat-overlay"></div>
-            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
-            <span class="col-name">docs/</span>
-            <span class="col-chevron">›</span>
-            <span class="col-score">★0.30</span>
-          </div>
-          <div class="col-item skip">
-            <div class="heat-overlay"></div>
-            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
-            <span class="col-name">tests/</span>
-            <span class="col-chevron">›</span>
-            <span class="col-score">★0.12</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-panel">
-        <div class="col-head">SRC/</div>
-        <div class="col-body">
-          <div class="col-item active" style="--heat-bg: hsl(220,80%,77%); --heat-opacity: 1; --heat-text: hsl(220,15%,12%);">
-            <div class="heat-overlay"></div>
-            <div class="col-active-line"></div>
-            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
-            <span class="col-name">components/</span>
-            <span class="col-chevron">›</span>
-            <span class="col-score">★0.95</span>
-          </div>
-          <div class="col-item" style="--heat-bg: hsl(220,80%,62%); --heat-opacity: 1;">
-            <div class="heat-overlay"></div>
-            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
-            <span class="col-name">hooks/</span>
-            <span class="col-chevron">›</span>
-            <span class="col-score">★0.70</span>
-          </div>
-          <div class="col-item skip">
-            <div class="heat-overlay"></div>
-            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
-            <span class="col-name">utils/</span>
-            <span class="col-chevron">›</span>
-            <span class="col-score">★0.10</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-panel">
-        <div class="col-head">COMPONENTS/</div>
-        <div class="col-body">
-          <div class="col-item active" style="--heat-bg: hsl(220,80%,77%); --heat-opacity: 1; --heat-text: hsl(220,15%,12%);">
-            <div class="heat-overlay"></div>
-            <div class="col-active-line"></div>
-            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
-            <span class="col-name">Button/</span>
-            <span class="col-chevron">›</span>
-            <span class="col-score">★0.95</span>
-          </div>
-          <div class="col-item" style="--heat-bg: hsl(220,80%,50%); --heat-opacity: 1;">
-            <div class="heat-overlay"></div>
-            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
-            <span class="col-name">Nav/</span>
-            <span class="col-chevron">›</span>
-            <span class="col-score">★0.50</span>
-          </div>
-          <div class="col-item" style="--heat-bg: hsl(220,80%,50%); --heat-opacity: 1;">
-            <div class="heat-overlay"></div>
-            <span class="col-icon ico-folder"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg></span>
-            <span class="col-name">Modal/</span>
-            <span class="col-chevron">›</span>
-            <span class="col-score">★0.50</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-panel">
-        <div class="col-head">BUTTON/</div>
-        <div class="col-body">
-          <div class="col-item active" style="--heat-bg: hsl(220,80%,77%); --heat-opacity: 1; --heat-text: hsl(220,15%,12%);" onclick="selColFile(this,'ButtonGroup.tsx','tsx','3.2 KB','2026-06-06',0.95)">
-            <div class="heat-overlay"></div>
-            <div class="col-active-line"></div>
-            <span class="col-icon ico-file-tsx"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
-            <span class="col-name">ButtonGroup.tsx</span>
-            <span class="col-score">★0.95</span>
-          </div>
-          <div class="col-item" style="--heat-bg: hsl(220,80%,75%); --heat-opacity: 1; --heat-text: hsl(220,15%,12%);" onclick="selColFile(this,'Button.tsx','tsx','2.4 KB','2026-06-08',0.92)">
-            <div class="heat-overlay"></div>
-            <span class="col-icon ico-file-tsx"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
-            <span class="col-name">Button.tsx</span>
-            <span class="col-score">★0.92</span>
-          </div>
-          <div class="col-item" style="--heat-bg: hsl(220,80%,68%); --heat-opacity: 1;" onclick="selColFile(this,'ButtonIcon.tsx','tsx','1.3 KB','2026-06-03',0.80)">
-            <div class="heat-overlay"></div>
-            <span class="col-icon ico-file-tsx"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
-            <span class="col-name">ButtonIcon.tsx</span>
-            <span class="col-score">★0.80</span>
-          </div>
-          <div class="col-item" style="--heat-bg: hsl(220,80%,44%); --heat-opacity: 1;" onclick="selColFile(this,'index.ts','ts','0.2 KB','2026-06-08',0.40)">
-            <div class="heat-overlay"></div>
-            <span class="col-icon ico-file-ts"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5A1.5 1.5 0 012.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg></span>
-            <span class="col-name">index.ts</span>
-            <span class="col-score">★0.40</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-panel detail-card">
-        <div class="col-head" id="detailCardHead">ButtonGroup.tsx</div>
-        <div class="col-body">
-          <div class="detail-filename" id="detailCardName">ButtonGroup.tsx</div>
-          <div class="detail-table">
-            <div class="detail-row"><span class="detail-key">形式</span><span class="detail-val" id="detailCardExt">tsx</span></div>
-            <div class="detail-row"><span class="detail-key">スコア</span><span class="detail-val" id="detailCardScore">★ 0.950</span></div>
-            <div class="detail-row"><span class="detail-key">サイズ</span><span class="detail-val" id="detailCardSize">3.2 KB</span></div>
-            <div class="detail-row"><span class="detail-key">更新日</span><span class="detail-val" id="detailCardDate">2026-06-06</span></div>
-          </div>
-          <!-- AIガイドパスライン: score >= 0.8 のファイルで表示 -->
-          <div class="guide-path-glow" id="detailCardGlow"></div>
-        </div>
-      </div>
-
-    </div>
+  <!-- 中央: カラムエクスプローラー -->
+  <div class="center-pane">
+    <div class="columns-scroll" id="columnsScroll"></div>
   </div>
+
+  <div class="resizer" id="resizerR"></div>
+
+  <!-- 右: プレビュー -->
+  <div class="preview-pane" id="previewPane"></div>
 
 </div>
 
+<!-- ══════════════ STATUSBAR ══════════════ -->
 <div class="statusbar">
-  <span class="status-dot loading"></span>
-  <span class="status-text">検索中…</span>
+  <span class="status-dot" id="statusDot"></span>
+  <span class="status-phase" id="statusPhase">待機中</span>
+  <span class="status-note" id="statusNote"></span>
+  <span class="status-log" id="statusLog"></span>
+  <span class="status-spacer"></span>
+  <span class="status-counts" id="statusCounts"></span>
+  <span class="status-ms" id="statusMs"></span>
+  <span class="status-hints" id="statusHints"></span>
+</div>
+
+<!-- 表示モードポップアップ（script から参照するため script より前に配置する） -->
+<div class="view-popup" id="viewPopup" role="menu" aria-label="左ペインの表示形式" hidden>
+  <div class="view-popup-label">左ペインの表示形式</div>
+
+  <button class="view-popup-item" role="menuitemradio" data-mode="compact" aria-checked="false">
+    <span class="view-popup-radio"></span>
+    <svg class="view-popup-preview" viewBox="0 0 40 28" aria-hidden="true">
+      <rect x="4" y="5"  width="32" height="6" rx="1" fill="currentColor" opacity="0.25"/>
+      <rect x="4" y="13" width="32" height="6" rx="1" fill="currentColor" opacity="0.25"/>
+      <rect x="4" y="21" width="24" height="6" rx="1" fill="currentColor" opacity="0.25"/>
+    </svg>
+    <span class="view-popup-name">コンパクト</span>
+    <span class="view-popup-desc">1行 · 28px</span>
+  </button>
+
+  <button class="view-popup-item" role="menuitemradio" data-mode="standard" aria-checked="false">
+    <span class="view-popup-radio"></span>
+    <svg class="view-popup-preview" viewBox="0 0 40 36" aria-hidden="true">
+      <rect x="4" y="3"  width="28" height="5" rx="1" fill="currentColor" opacity="0.7"/>
+      <rect x="4" y="10" width="20" height="3" rx="1" fill="currentColor" opacity="0.3"/>
+      <rect x="4" y="17" width="28" height="5" rx="1" fill="currentColor" opacity="0.7"/>
+      <rect x="4" y="24" width="20" height="3" rx="1" fill="currentColor" opacity="0.3"/>
+    </svg>
+    <span class="view-popup-name">標準</span>
+    <span class="view-popup-desc">2行 · 40px（デフォルト）</span>
+  </button>
+
+  <button class="view-popup-item" role="menuitemradio" data-mode="detail" aria-checked="false">
+    <span class="view-popup-radio"></span>
+    <svg class="view-popup-preview" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="4" y="3"  width="19" height="4" rx="1" fill="currentColor" opacity="0.7"/>
+      <rect x="4" y="9"  width="13" height="3" rx="1" fill="currentColor" opacity="0.3"/>
+      <rect x="29" y="4" width="7"  height="3" rx="1" fill="currentColor" opacity="0.45"/>
+      <rect x="4" y="17" width="19" height="4" rx="1" fill="currentColor" opacity="0.7"/>
+      <rect x="4" y="23" width="13" height="3" rx="1" fill="currentColor" opacity="0.3"/>
+      <rect x="29" y="18" width="7" height="3" rx="1" fill="currentColor" opacity="0.45"/>
+    </svg>
+    <span class="view-popup-name">詳細</span>
+    <span class="view-popup-desc">列常時表示 · 44px</span>
+  </button>
 </div>
 
 <script>
-  /* ── 行選択 ── */
-  function selRow(el) {
-    document.querySelectorAll('.file-row').forEach(r => r.classList.remove('selected'));
-    el.classList.add('selected');
-  }
+/* ═══════════════════════════════════════
+   SECTION J1: データモデル（単一ソース。HTML直書きの二重持ちを廃止）
+═══════════════════════════════════════ */
 
-  /* ── カラムファイル選択 ── */
-  function selColFile(el, name, ext, size, date, score) {
-    el.closest('.col-panel').querySelectorAll('.col-item').forEach(i => {
-      i.classList.remove('active');
-      i.querySelector('.col-active-line')?.remove();
-    });
-    el.classList.add('active');
-    if (!el.querySelector('.col-active-line')) {
-      const line = document.createElement('div');
-      line.className = 'col-active-line';
-      el.insertBefore(line, el.firstChild.nextSibling);
+/* SVGアイコンセット（16pxグリッド・currentColor・stroke 1.5 統一） */
+const ICONS = {
+  folder: `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 2A1.75 1.75 0 0 0 0 3.75v8.5C0 13.216.784 14 1.75 14h12.5A1.75 1.75 0 0 0 16 12.25v-7.5A1.75 1.75 0 0 0 14.25 3H7.81a.25.25 0 0 1-.177-.073L6.323 1.616A1.75 1.75 0 0 0 5.085 1H1.75ZM1.5 3.75a.25.25 0 0 1 .25-.25h3.335a.25.25 0 0 1 .177.073l1.31 1.311c.329.329.775.514 1.24.516H14.25a.25.25 0 0 1 .25.25v7.5a.25.25 0 0 1-.25.25H1.75a.25.25 0 0 1-.25-.25v-8.5Z"/></svg>`,
+  fileCode: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 1.5h6L13 5v9a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5Z"/><path d="M9.5 1.5V5h3.5"/><path d="M6 8 4.5 9.5 6 11"/><path d="M9 8l1.5 1.5L9 11"/></svg>`,
+  fileText: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 1.5h6L13 5v9a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5Z"/><path d="M9.5 1.5V5h3.5"/><path d="M5 8h5"/><path d="M5 10.25h5"/><path d="M5 12.5h3"/></svg>`,
+  fileGeneric: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 1.5h6L13 5v9a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5Z"/><path d="M9.5 1.5V5h3.5"/></svg>`,
+  chevronRight: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5 10.5 8 6 12.5"/></svg>`,
+  sortArrow: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5v-9"/><path d="M4.5 6.5 8 3l3.5 3.5"/></svg>`,
+  search: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.25"/><path d="M10.1 10.1 13.5 13.5"/></svg>`,
+  spark: `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1c.3 2.1 1 3.6 2.2 4.8C11.4 7 12.9 7.7 15 8c-2.1.3-3.6 1-4.8 2.2C9 11.4 8.3 12.9 8 15c-.3-2.1-1-3.6-2.2-4.8C4.6 9 3.1 8.3 1 8c2.1-.3 3.6-1 4.8-2.2C7 4.6 7.7 3.1 8 1Z"/><circle cx="13" cy="3" r="1"/></svg>`,
+  warning: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.75 14.5 13.5h-13L8 1.75Z"/><path d="M8 6.25v3"/><path d="M8 11.5v.01"/></svg>`,
+  x: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 3.5l9 9"/><path d="M12.5 3.5l-9 9"/></svg>`,
+  globe: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.25"/><path d="M1.75 8h12.5"/><path d="M8 1.75c1.8 1.9 2.8 4 2.8 6.25S9.8 12.35 8 14.25C6.2 12.35 5.2 10.25 5.2 8S6.2 3.65 8 1.75Z"/></svg>`,
+  arrowRight: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h9"/><path d="M8.5 4.5 12 8l-3.5 3.5"/></svg>`,
+  panelRight: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10.5 2.5v11"/></svg>`,
+};
+
+/* 検索結果（クエリ「Reactのボタンコンポーネント」のA*探索結果という設定） */
+const FILES = [
+  { id: 'buttongroup',     name: 'ButtonGroup.tsx',    ext: 'tsx',  folder: 'src\\components\\Button', sizeKB: 3.2,   size: '3.2 KB',   date: '2026-06-06', score: 0.95 },
+  { id: 'button',          name: 'Button.tsx',         ext: 'tsx',  folder: 'src\\components\\Button', sizeKB: 2.4,   size: '2.4 KB',   date: '2026-06-08', score: 0.92 },
+  { id: 'buttonicon',      name: 'ButtonIcon.tsx',     ext: 'tsx',  folder: 'src\\components\\Button', sizeKB: 1.3,   size: '1.3 KB',   date: '2026-06-03', score: 0.80 },
+  { id: 'usebutton',       name: 'useButton.ts',       ext: 'ts',   folder: 'src\\hooks',              sizeKB: 1.1,   size: '1.1 KB',   date: '2026-06-07', score: 0.71 },
+  { id: 'navbutton',       name: 'NavButton.tsx',      ext: 'tsx',  folder: 'src\\components\\Nav',    sizeKB: 1.8,   size: '1.8 KB',   date: '2026-05-30', score: 0.64 },
+  { id: 'modalbutton',     name: 'ModalButton.tsx',    ext: 'tsx',  folder: 'src\\components\\Modal',  sizeKB: 2.0,   size: '2.0 KB',   date: '2026-05-28', score: 0.58 },
+  { id: 'index-ts',        name: 'index.ts',           ext: 'ts',   folder: 'src\\components\\Button', sizeKB: 0.2,   size: '0.2 KB',   date: '2026-06-08', score: 0.40 },
+  { id: 'button-css',      name: 'button.css',         ext: 'css',  folder: 'src\\styles',             sizeKB: 0.9,   size: '0.9 KB',   date: '2026-06-01', score: 0.34 },
+  { id: 'button-md',       name: 'button.md',          ext: 'md',   folder: 'docs\\components',        sizeKB: 1.5,   size: '1.5 KB',   date: '2026-05-20', score: 0.28 },
+  { id: 'button-test',     name: 'Button.test.tsx',    ext: 'tsx',  folder: 'tests\\components',       sizeKB: 4.1,   size: '4.1 KB',   date: '2026-06-05', score: 0.25 },
+  { id: 'types-generated', name: 'types.generated.ts', ext: 'ts',   folder: 'src\\types',              sizeKB: 412.0, size: '412.0 KB', date: '2026-06-09', score: 0.18 },
+  { id: 'button-spec',     name: 'button-spec.xlsx',   ext: 'xlsx', folder: 'docs\\specs',             sizeKB: 88.5,  size: '88.5 KB',  date: '2026-05-12', score: 0.12 },
+];
+
+/* フォルダツリー（カラムナビゲーションの単一ソース）。
+   各ノードは A* メタ（score / state / onPath）を保持し、フォルダは children を持つ。
+   onPath = 最高スコアの確定パス。Finder型カラムナビでは確定パス外のフォルダも
+   開いて下階層へ潜れるよう、全フォルダに children を与えてある。 */
+const TREE = {
+  name: 'ルート', type: 'folder', children: [
+    { name: 'src/', type: 'folder', score: 0.95, state: 'opened', onPath: true, children: [
+        { name: 'components/', type: 'folder', score: 0.95, state: 'opened', onPath: true, children: [
+            { name: 'Button/', type: 'folder', score: 0.95, state: 'opened', onPath: true, children: [
+                { name: 'ButtonGroup.tsx', type: 'file', fileId: 'buttongroup', score: 0.95, state: 'found', onPath: true },
+                { name: 'Button.tsx',      type: 'file', fileId: 'button',      score: 0.92, state: 'found' },
+                { name: 'ButtonIcon.tsx',  type: 'file', fileId: 'buttonicon',  score: 0.80, state: 'found' },
+                { name: 'index.ts',        type: 'file', fileId: 'index-ts',    score: 0.40, state: 'found' },
+            ]},
+            { name: 'Nav/', type: 'folder', score: 0.50, state: 'opened', children: [
+                { name: 'NavButton.tsx', type: 'file', fileId: 'navbutton', score: 0.64, state: 'found' },
+                { name: 'NavBar.tsx',    type: 'file', score: 0.42, state: 'found' },
+                { name: 'NavLink.tsx',   type: 'file', score: 0.30, state: 'found' },
+            ]},
+            { name: 'Modal/', type: 'folder', score: 0.50, state: 'opened', children: [
+                { name: 'ModalButton.tsx', type: 'file', fileId: 'modalbutton', score: 0.58, state: 'found' },
+                { name: 'Modal.tsx',       type: 'file', score: 0.45, state: 'found' },
+                { name: 'ModalHeader.tsx', type: 'file', score: 0.22, state: 'found' },
+            ]},
+        ]},
+        { name: 'hooks/', type: 'folder', score: 0.70, state: 'opened', children: [
+            { name: 'useButton.ts', type: 'file', fileId: 'usebutton', score: 0.71, state: 'found' },
+            { name: 'useToggle.ts', type: 'file', score: 0.33, state: 'found' },
+            { name: 'useModal.ts',  type: 'file', score: 0.30, state: 'found' },
+        ]},
+        { name: 'utils/', type: 'folder', score: 0.10, state: 'skipped', children: [
+            { name: 'classNames.ts', type: 'file', score: 0.12, state: 'found' },
+            { name: 'format.ts',     type: 'file', score: 0.08, state: 'found' },
+        ]},
+        { name: 'styles/', type: 'folder', score: 0.34, state: 'opened', children: [
+            { name: 'button.css', type: 'file', fileId: 'button-css', score: 0.34, state: 'found' },
+            { name: 'global.css', type: 'file', score: 0.10, state: 'found' },
+        ]},
+        { name: 'types/', type: 'folder', score: 0.18, state: 'opened', children: [
+            { name: 'types.generated.ts', type: 'file', fileId: 'types-generated', score: 0.18, state: 'found' },
+            { name: 'index.d.ts',         type: 'file', score: 0.09, state: 'found' },
+        ]},
+    ]},
+    { name: 'docs/', type: 'folder', score: 0.30, state: 'skipped', children: [
+        { name: 'components/', type: 'folder', score: 0.28, state: 'opened', children: [
+            { name: 'button.md', type: 'file', fileId: 'button-md', score: 0.28, state: 'found' },
+            { name: 'modal.md',  type: 'file', score: 0.15, state: 'found' },
+        ]},
+        { name: 'specs/', type: 'folder', score: 0.12, state: 'opened', children: [
+            { name: 'button-spec.xlsx', type: 'file', fileId: 'button-spec', score: 0.12, state: 'found' },
+        ]},
+    ]},
+    { name: 'tests/', type: 'folder', score: 0.12, state: 'skipped', children: [
+        { name: 'components/', type: 'folder', score: 0.25, state: 'opened', children: [
+            { name: 'Button.test.tsx', type: 'file', fileId: 'button-test', score: 0.25, state: 'found' },
+        ]},
+    ]},
+  ]
+};
+
+/* 既定（A*確定）パスの連鎖ノード: [root, src, components, Button] */
+const COL_NODES_DEFAULT = (() => {
+  const nodes = [TREE];
+  let cur = TREE;
+  while (cur.children) {
+    const next = cur.children.find(c => c.type === 'folder' && c.onPath);
+    if (!next) break;
+    nodes.push(next);
+    cur = next;
+  }
+  return nodes;
+})();
+
+/* デモ用カラムスナップショット（各ノードの children を 1 カラムとして表示）。
+   既存のデモタイムライン（addColumn(idx) / markSkip(col,item)）はこの配列を参照する */
+const COLUMNS = COL_NODES_DEFAULT.map((node, i) => ({
+  label: i === 0 ? 'ルート' : node.name,
+  node,
+  items: node.children || [],
+}));
+
+/* プレビューモックコンテンツ（backend.md §6 の4状態: code / markdown / truncated / unsupported）
+   コードはハイライタを実装せず事前トークン化済みspanで持つ */
+const PREVIEWS = {
+  'buttongroup': {
+    type: 'code',
+    truncated: false,
+    lines: [
+      '<span class="tok-kw">import</span> React <span class="tok-kw">from</span> <span class="tok-str">\'react\'</span>;',
+      '<span class="tok-kw">import</span> { Button } <span class="tok-kw">from</span> <span class="tok-str">\'./Button\'</span>;',
+      '<span class="tok-kw">import</span> <span class="tok-kw">type</span> { ButtonProps } <span class="tok-kw">from</span> <span class="tok-str">\'./Button\'</span>;',
+      '',
+      '<span class="tok-cm">// ボタン群の並び方向と間隔を指定するプロパティ</span>',
+      '<span class="tok-kw">interface</span> <span class="tok-type">ButtonGroupProps</span> {',
+      '  direction?: <span class="tok-str">\'horizontal\'</span> | <span class="tok-str">\'vertical\'</span>;',
+      '  gap?: <span class="tok-num">number</span>;',
+      '  buttons: <span class="tok-type">ButtonProps</span>[];',
+      '}',
+      '',
+      '<span class="tok-kw">const</span> <span class="tok-fn">ButtonGroup</span>: React.FC&lt;<span class="tok-type">ButtonGroupProps</span>&gt; = ({',
+      '  direction = <span class="tok-str">\'horizontal\'</span>,',
+      '  gap = <span class="tok-num">8</span>,',
+      '  buttons,',
+      '}) =&gt; {',
+      '  <span class="tok-kw">const</span> containerStyle = {',
+      '    display: <span class="tok-str">\'flex\'</span>,',
+      '    flexDirection: direction === <span class="tok-str">\'vertical\'</span> ? <span class="tok-str">\'column\'</span> : <span class="tok-str">\'row\'</span>,',
+      '    gap: `${gap}px`,',
+      '  };',
+      '',
+      '  <span class="tok-kw">return</span> (',
+      '    &lt;<span class="tok-type">div</span> style={containerStyle}&gt;',
+      '      {/* 各ボタンにpropsを展開して描画 */}',
+      '      {buttons.map((btnProps, index) =&gt; (',
+      '        &lt;<span class="tok-type">Button</span> key={index} {...btnProps} /&gt;',
+      '      ))}',
+      '    &lt;/<span class="tok-type">div</span>&gt;',
+      '  );',
+      '};',
+      '',
+      '<span class="tok-kw">export</span> <span class="tok-kw">default</span> <span class="tok-fn">ButtonGroup</span>;'
+    ]
+  },
+  'button': {
+    type: 'code',
+    truncated: false,
+    lines: [
+      '<span class="tok-kw">import</span> React <span class="tok-kw">from</span> <span class="tok-str">\'react\'</span>;',
+      '<span class="tok-kw">import</span> <span class="tok-str">\'./button.css\'</span>;',
+      '',
+      '<span class="tok-kw">export</span> <span class="tok-kw">interface</span> <span class="tok-type">ButtonProps</span> {',
+      '  variant?: <span class="tok-str">\'primary\'</span> | <span class="tok-str">\'secondary\'</span> | <span class="tok-str">\'danger\'</span>;',
+      '  size?: <span class="tok-str">\'sm\'</span> | <span class="tok-str">\'md\'</span> | <span class="tok-str">\'lg\'</span>;',
+      '  disabled?: <span class="tok-num">boolean</span>;',
+      '  onClick?: () =&gt; <span class="tok-kw">void</span>;',
+      '  children: React.ReactNode;',
+      '}',
+      '',
+      '<span class="tok-kw">const</span> <span class="tok-fn">Button</span>: React.FC&lt;<span class="tok-type">ButtonProps</span>&gt; = ({',
+      '  variant = <span class="tok-str">\'primary\'</span>,',
+      '  size = <span class="tok-str">\'md\'</span>,',
+      '  disabled = <span class="tok-kw">false</span>,',
+      '  onClick,',
+      '  children,',
+      '}) =&gt; {',
+      '  <span class="tok-kw">return</span> (',
+      '    &lt;<span class="tok-type">button</span>',
+      '      className={`btn btn-${variant} btn-${size}`}',
+      '      disabled={disabled}',
+      '      onClick={onClick}',
+      '    &gt;',
+      '      {children}',
+      '    &lt;/<span class="tok-type">button</span>&gt;',
+      '  );',
+      '};',
+      '',
+      '<span class="tok-kw">export</span> <span class="tok-kw">default</span> <span class="tok-fn">Button</span>;'
+    ]
+  },
+  'buttonicon': {
+    type: 'code',
+    truncated: false,
+    lines: [
+      '<span class="tok-kw">import</span> React <span class="tok-kw">from</span> <span class="tok-str">\'react\'</span>;',
+      '',
+      '<span class="tok-kw">interface</span> <span class="tok-type">ButtonIconProps</span> {',
+      '  icon: React.ReactNode;',
+      '  label: <span class="tok-num">string</span>;',
+      '  onClick?: () =&gt; <span class="tok-kw">void</span>;',
+      '}',
+      '',
+      '<span class="tok-cm">// アイコンのみのボタン。aria-labelで読み上げ対応</span>',
+      '<span class="tok-kw">const</span> <span class="tok-fn">ButtonIcon</span>: React.FC&lt;<span class="tok-type">ButtonIconProps</span>&gt; = ({ icon, label, onClick }) =&gt; {',
+      '  <span class="tok-kw">return</span> (',
+      '    &lt;<span class="tok-type">button</span> className=<span class="tok-str">"btn-icon"</span> aria-label={label} onClick={onClick}&gt;',
+      '      {icon}',
+      '    &lt;/<span class="tok-type">button</span>&gt;',
+      '  );',
+      '};',
+      '',
+      '<span class="tok-kw">export</span> <span class="tok-kw">default</span> <span class="tok-fn">ButtonIcon</span>;'
+    ]
+  },
+  'usebutton': {
+    type: 'code',
+    truncated: false,
+    lines: [
+      '<span class="tok-kw">import</span> { useState, useCallback } <span class="tok-kw">from</span> <span class="tok-str">\'react\'</span>;',
+      '',
+      '<span class="tok-cm">// ボタンの押下状態とハンドラをまとめて返すフック</span>',
+      '<span class="tok-kw">export</span> <span class="tok-kw">function</span> <span class="tok-fn">useButton</span>(onPress?: () =&gt; <span class="tok-kw">void</span>) {',
+      '  <span class="tok-kw">const</span> [pressed, setPressed] = useState(<span class="tok-kw">false</span>);',
+      '',
+      '  <span class="tok-kw">const</span> handlePress = useCallback(() =&gt; {',
+      '    setPressed(<span class="tok-kw">true</span>);',
+      '    onPress?.();',
+      '    setTimeout(() =&gt; setPressed(<span class="tok-kw">false</span>), <span class="tok-num">150</span>);',
+      '  }, [onPress]);',
+      '',
+      '  <span class="tok-kw">return</span> { pressed, handlePress };',
+      '}'
+    ]
+  },
+  'navbutton': {
+    type: 'code',
+    truncated: false,
+    lines: [
+      '<span class="tok-kw">import</span> React <span class="tok-kw">from</span> <span class="tok-str">\'react\'</span>;',
+      '<span class="tok-kw">import</span> { Link } <span class="tok-kw">from</span> <span class="tok-str">\'react-router-dom\'</span>;',
+      '',
+      '<span class="tok-kw">interface</span> <span class="tok-type">NavButtonProps</span> {',
+      '  to: <span class="tok-num">string</span>;',
+      '  label: <span class="tok-num">string</span>;',
+      '}',
+      '',
+      '<span class="tok-kw">const</span> <span class="tok-fn">NavButton</span>: React.FC&lt;<span class="tok-type">NavButtonProps</span>&gt; = ({ to, label }) =&gt; (',
+      '  &lt;<span class="tok-type">Link</span> to={to} className=<span class="tok-str">"nav-button"</span>&gt;',
+      '    {label}',
+      '  &lt;/<span class="tok-type">Link</span>&gt;',
+      ');',
+      '',
+      '<span class="tok-kw">export</span> <span class="tok-kw">default</span> <span class="tok-fn">NavButton</span>;'
+    ]
+  },
+  'modalbutton': {
+    type: 'code',
+    truncated: false,
+    lines: [
+      '<span class="tok-kw">import</span> React <span class="tok-kw">from</span> <span class="tok-str">\'react\'</span>;',
+      '<span class="tok-kw">import</span> Button <span class="tok-kw">from</span> <span class="tok-str">\'./Button\'</span>;',
+      '',
+      '<span class="tok-kw">interface</span> <span class="tok-type">ModalButtonProps</span> {',
+      '  onOpen: () =&gt; <span class="tok-kw">void</span>;',
+      '}',
+      '',
+      '<span class="tok-cm">// モーダルを開くトリガー専用ボタン</span>',
+      '<span class="tok-kw">const</span> <span class="tok-fn">ModalButton</span>: React.FC&lt;<span class="tok-type">ModalButtonProps</span>&gt; = ({ onOpen }) =&gt; (',
+      '  &lt;<span class="tok-type">Button</span> variant=<span class="tok-str">"secondary"</span> onClick={onOpen}&gt;',
+      '    詳細を開く',
+      '  &lt;/<span class="tok-type">Button</span>&gt;',
+      ');',
+      '',
+      '<span class="tok-kw">export</span> <span class="tok-kw">default</span> <span class="tok-fn">ModalButton</span>;'
+    ]
+  },
+  'index-ts': {
+    type: 'code',
+    truncated: false,
+    lines: [
+      '<span class="tok-kw">export</span> { <span class="tok-kw">default</span> <span class="tok-kw">as</span> <span class="tok-fn">Button</span> } <span class="tok-kw">from</span> <span class="tok-str">\'./Button\'</span>;',
+      '<span class="tok-kw">export</span> { <span class="tok-kw">default</span> <span class="tok-kw">as</span> <span class="tok-fn">ButtonGroup</span> } <span class="tok-kw">from</span> <span class="tok-str">\'./ButtonGroup\'</span>;',
+      '<span class="tok-kw">export</span> { <span class="tok-kw">default</span> <span class="tok-kw">as</span> <span class="tok-fn">ButtonIcon</span> } <span class="tok-kw">from</span> <span class="tok-str">\'./ButtonIcon\'</span>;',
+      '<span class="tok-kw">export</span> <span class="tok-kw">type</span> { <span class="tok-type">ButtonProps</span> } <span class="tok-kw">from</span> <span class="tok-str">\'./Button\'</span>;'
+    ]
+  },
+  'button-test': {
+    type: 'code',
+    truncated: false,
+    lines: [
+      '<span class="tok-kw">import</span> { render, screen, fireEvent } <span class="tok-kw">from</span> <span class="tok-str">\'@testing-library/react\'</span>;',
+      '<span class="tok-kw">import</span> Button <span class="tok-kw">from</span> <span class="tok-str">\'./Button\'</span>;',
+      '',
+      'describe(<span class="tok-str">\'Button\'</span>, () =&gt; {',
+      '  it(<span class="tok-str">\'クリックでonClickが呼ばれる\'</span>, () =&gt; {',
+      '    <span class="tok-kw">const</span> handleClick = jest.fn();',
+      '    render(&lt;<span class="tok-type">Button</span> onClick={handleClick}&gt;送信&lt;/<span class="tok-type">Button</span>&gt;);',
+      '',
+      '    fireEvent.click(screen.getByText(<span class="tok-str">\'送信\'</span>));',
+      '    expect(handleClick).toHaveBeenCalledTimes(<span class="tok-num">1</span>);',
+      '  });',
+      '',
+      '  it(<span class="tok-str">\'disabled時はクリックできない\'</span>, () =&gt; {',
+      '    render(&lt;<span class="tok-type">Button</span> disabled&gt;送信&lt;/<span class="tok-type">Button</span>&gt;);',
+      '    expect(screen.getByText(<span class="tok-str">\'送信\'</span>)).toBeDisabled();',
+      '  });',
+      '});'
+    ]
+  },
+  'button-css': {
+    type: 'code',
+    truncated: false,
+    lines: [
+      '<span class="tok-fn">.btn</span> {',
+      '  display: inline-flex;',
+      '  align-items: center;',
+      '  justify-content: center;',
+      '  border-radius: <span class="tok-num">6</span>px;',
+      '  font-weight: <span class="tok-num">600</span>;',
+      '  cursor: pointer;',
+      '}',
+      '',
+      '<span class="tok-fn">.btn-primary</span> {',
+      '  background-color: <span class="tok-str">#2563eb</span>;',
+      '  color: <span class="tok-str">#ffffff</span>;',
+      '}',
+      '',
+      '<span class="tok-fn">.btn-secondary</span> {',
+      '  background-color: <span class="tok-str">#e5e7eb</span>;',
+      '  color: <span class="tok-str">#1f2937</span>;',
+      '}'
+    ]
+  },
+  'types-generated': {
+    type: 'code',
+    truncated: true,
+    lines: [
+      '<span class="tok-cm">// 自動生成ファイル・編集不可</span>',
+      '<span class="tok-cm">// このファイルを直接編集しないでください</span>',
+      '<span class="tok-cm">// generated by build:types script</span>',
+      '',
+      '<span class="tok-kw">export</span> <span class="tok-kw">type</span> <span class="tok-type">ButtonVariant</span> = <span class="tok-str">\'primary\'</span> | <span class="tok-str">\'secondary\'</span> | <span class="tok-str">\'danger\'</span>;',
+      '<span class="tok-kw">export</span> <span class="tok-kw">type</span> <span class="tok-type">ButtonSize</span> = <span class="tok-str">\'sm\'</span> | <span class="tok-str">\'md\'</span> | <span class="tok-str">\'lg\'</span>;',
+      '',
+      '<span class="tok-kw">export</span> <span class="tok-kw">interface</span> <span class="tok-type">ButtonGroupDirection</span> {',
+      '  horizontal: <span class="tok-str">\'horizontal\'</span>;',
+      '  vertical: <span class="tok-str">\'vertical\'</span>;',
+      '}',
+      '',
+      '<span class="tok-kw">export</span> <span class="tok-kw">interface</span> <span class="tok-type">ButtonIconMap</span> {',
+      '  add: <span class="tok-str">\'plus\'</span>;',
+      '  remove: <span class="tok-str">\'minus\'</span>;',
+      '  close: <span class="tok-str">\'x\'</span>;',
+      '  edit: <span class="tok-str">\'pencil\'</span>;',
+      '}',
+      '',
+      '<span class="tok-kw">export</span> <span class="tok-kw">declare</span> <span class="tok-kw">const</span> BUTTON_DEFAULTS: {',
+      '  variant: <span class="tok-type">ButtonVariant</span>;',
+      '  size: <span class="tok-type">ButtonSize</span>;',
+      '};',
+      '',
+      '<span class="tok-kw">export</span> <span class="tok-kw">declare</span> <span class="tok-kw">function</span> <span class="tok-fn">isButtonVariant</span>(value: <span class="tok-num">string</span>): value <span class="tok-kw">is</span> <span class="tok-type">ButtonVariant</span>;',
+      '<span class="tok-kw">export</span> <span class="tok-kw">declare</span> <span class="tok-kw">function</span> <span class="tok-fn">isButtonSize</span>(value: <span class="tok-num">string</span>'
+    ]
+  },
+  'button-md': {
+    type: 'markdown',
+    html: '<h1>Button コンポーネント</h1><p>汎用的なボタンUIを提供するコンポーネント。<code>variant</code> と <code>size</code> の組み合わせで見た目を切り替えられる。</p><h2>使い方</h2><pre>import Button from \'./Button\';\n\n&lt;Button variant="primary" onClick={handleClick}&gt;\n  送信\n&lt;/Button&gt;</pre><h2>Props 一覧</h2><ul><li><strong>variant</strong>: <code>\'primary\' | \'secondary\' | \'danger\'</code> - ボタンの種類（既定値は <code>primary</code>）</li><li><strong>size</strong>: <code>\'sm\' | \'md\' | \'lg\'</code> - ボタンのサイズ（既定値は <code>md</code>）</li><li><strong>disabled</strong>: <code>boolean</code> - 無効状態にするかどうか</li><li><strong>onClick</strong>: <code>() =&gt; void</code> - クリック時に呼ばれるコールバック</li><li><strong>children</strong>: <code>React.ReactNode</code> - ボタン内に表示する内容</li></ul><p>アイコンのみを表示したい場合は <strong>ButtonIcon</strong> コンポーネントを使用すること。</p>'
+  },
+  'button-spec': {
+    type: 'unsupported',
+    format: 'xlsx',
+    note: 'Excel ワークシート'
+  }
+};
+
+/* ═══════════════════════════════════════
+   SECTION J2: レンダラ
+═══════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+const fileList      = $('fileList');
+const columnsScroll = $('columnsScroll');
+const previewPane   = $('previewPane');
+const leftPane      = $('leftPane');
+const statusDot    = $('statusDot');
+const statusPhase  = $('statusPhase');
+const statusNote   = $('statusNote');
+const statusLog    = $('statusLog');
+const statusCounts = $('statusCounts');
+const statusMs     = $('statusMs');
+const statusHints  = $('statusHints');
+const searchInput = $('searchInput');
+const searchWrap  = $('searchWrap');
+const searchKbd   = $('searchKbd');
+
+/* CSSの0.01ms化だけではJS駆動のタイムラインに効かないため、JS側でも分岐する */
+const RM = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+const state = {
+  hasResults: false,
+  selectedId: null,
+  sortCol: 'score',
+  sortAsc: false,
+  files: FILES.slice(),
+  navPath: [],          // 中央カラムで現在開いているフォルダ連鎖 [root, …]
+};
+
+/* ヒートマップ色: hsl(220,80%, 20%+score*60%)（frontend.md §2 準拠） */
+function heatBg(score) { return `hsl(220, 80%, ${(20 + score * 60).toFixed(1)}%)`; }
+/* スコアpill文字色: 背景輝度に応じた2値切替（0.6以上は明背景→黒文字で 4.5:1 以上を確保） */
+function heatText(score) { return score >= 0.6 ? '#0d1117' : '#e6edf3'; }
+
+function setHeat(el, score, heatState) {
+  const op = heatState === 'skipped' ? score * 0.5 : score; // skipped は減衰して「見えるが掘られない」
+  el.style.setProperty('--heat-bg', heatBg(score));
+  el.style.setProperty('--heat-opacity', op.toFixed(3));
+  el.style.setProperty('--heat-text', heatText(score));
+}
+
+const KNOWN_EXT = ['tsx', 'ts', 'css', 'md', 'json', 'rs', 'toml'];
+function extBadge(ext) {
+  const cls = KNOWN_EXT.includes(ext) ? 'ext-' + ext : 'ext-other';
+  return `<span class="ext-badge ${cls}">${ext.slice(0, 4).toUpperCase()}</span>`;
+}
+const CODE_EXT = ['tsx', 'ts', 'jsx', 'js', 'css', 'rs', 'toml', 'json'];
+function fileIconFor(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  if (CODE_EXT.includes(ext)) return `<span class="col-icon ico-code">${ICONS.fileCode}</span>`;
+  if (ext === 'md' || ext === 'txt') return `<span class="col-icon">${ICONS.fileText}</span>`;
+  return `<span class="col-icon">${ICONS.fileGeneric}</span>`;
+}
+
+/* ── 空状態 ── */
+const EMPTY_RESULTS = `
+  <div class="empty-state">
+    <div class="empty-icon">${ICONS.search}</div>
+    <div class="empty-title">検索キーワードを入力してください</div>
+    <div class="empty-hint"><kbd>Ctrl</kbd><kbd>K</kbd> で検索 / <kbd>Enter</kbd> で実行</div>
+  </div>`;
+const EMPTY_COLUMNS = `
+  <div class="empty-state">
+    <div class="empty-icon">${ICONS.spark}</div>
+    <div class="empty-title">検索を実行するとA*探索の過程を表示します</div>
+    <div class="empty-hint"><kbd>Enter</kbd> デモ再生</div>
+  </div>`;
+const EMPTY_PREVIEW = `
+  <div class="empty-state">
+    <div class="empty-icon">${ICONS.fileText}</div>
+    <div class="empty-title">ファイルを選択するとプレビューを表示します</div>
+    <div class="empty-hint"><kbd>↑</kbd><kbd>↓</kbd> で選択を移動</div>
+  </div>`;
+
+/* ── 結果リスト ── */
+function buildRow(f) {
+  const row = document.createElement('div');
+  row.className = 'file-row';
+  row.tabIndex = 0;
+  row.dataset.id = f.id;
+  row.setAttribute('role', 'option');
+  row.innerHTML =
+    `<span class="row-heatbar"></span>` +
+    `<div class="row-score"><span class="row-score-num">${f.score.toFixed(2)}</span>` +
+    `<div class="row-score-bar"><div class="row-score-fill" style="transform:scaleX(${f.score})"></div></div></div>` +
+    `<div class="row-main"><div class="row-name">${extBadge(f.ext)}<span class="row-file">${f.name}</span></div>` +
+    `<div class="row-folder">${f.folder}</div></div>` +
+    `<div class="row-folder-col">${f.folder}</div>` +
+    `<div class="row-size">${f.size}</div><div class="row-date">${f.date}</div>`;
+  row.style.setProperty('--heat-bg', heatBg(f.score));
+  row.addEventListener('click', () => selectFile(f.id, false, true));
+  return row;
+}
+
+function renderResults(opts = {}) {
+  fileList.innerHTML = '';
+  state.hasResults = true;
+  const frag = document.createDocumentFragment();
+  state.files.forEach(f => frag.appendChild(buildRow(f)));
+  fileList.appendChild(frag);
+  const rows = [...fileList.children];
+  if (opts.stagger && !RM.matches) {
+    rows.forEach((r, i) => { r.classList.add('pre'); r.style.transitionDelay = (i * 30) + 'ms'; });
+    // 挿入直後に再フローを強制し、クラス除去を確実にトランジションとして発火させる
+    void fileList.offsetWidth;
+    rows.forEach(r => r.classList.remove('pre'));
+    // hover背景の遷移にdelayが残らないよう入場後に除去
+    setTimeout(() => rows.forEach(r => { r.style.transitionDelay = ''; }), rows.length * 30 + 400);
+  }
+  if (state.selectedId) {
+    const sel = fileList.querySelector(`[data-id="${state.selectedId}"]`);
+    if (sel) sel.classList.add('selected');
+  }
+}
+
+function renderSkeleton() {
+  state.hasResults = false;
+  const widths = [72, 55, 80, 48, 64, 70];
+  fileList.innerHTML = widths.map(w =>
+    `<div class="sk-row"><span class="sk-block sk-score"></span><span class="sk-block sk-badge"></span>` +
+    `<span class="sk-block sk-line" style="flex:0 0 ${w}%"></span></div>`).join('');
+}
+
+/* ── カラムエクスプローラー（Finder型カラムナビ） ──
+   state.navPath = 現在開いているフォルダ連鎖 [root, …]。
+   カラム ci は navPath[ci] の children を表示し、navPath[ci+1] が ci で選択中のフォルダ。
+   確定パス末端（Button）のノードを基準にガイドグローを出し分ける。 */
+const DEFAULT_LEAF = COL_NODES_DEFAULT[COL_NODES_DEFAULT.length - 1];
+
+/* ノード → カラム表示オブジェクト */
+function colObjFor(node, depth) {
+  return { label: depth === 0 ? 'ルート' : node.name, node, items: node.children || [] };
+}
+
+function buildColumn(col, depth, animate) {
+  const panel = document.createElement('div');
+  panel.className = 'col-panel ' + (animate ? 'pre' : 'in');
+  panel.dataset.depth = depth;
+  panel.innerHTML =
+    `<div class="col-head"><span class="col-depth">${depth + 1}</span><span class="col-head-label">${col.label}</span></div>`;
+  const body = document.createElement('div');
+  body.className = 'col-body';
+  col.items.forEach((item, itemIdx) => {
+    const el = document.createElement('div');
+    el.className = 'col-item ' + (animate ? 'pre' : 'in');
+    el.tabIndex = 0;
+    el.dataset.idx = itemIdx;
+    // ファイルは fileId（無い合成ファイルは name 由来の擬似ID）で選択状態を同期
+    if (item.type === 'file') el.dataset.fileId = item.fileId || ('f:' + depth + ':' + item.name);
+    const icon = item.type === 'folder'
+      ? `<span class="col-icon ico-folder">${ICONS.folder}</span>`
+      : fileIconFor(item.name);
+    el.innerHTML =
+      `<div class="heat-overlay"></div><span class="item-heatbar"></span>` + icon +
+      `<span class="col-name">${item.name}</span>` +
+      (item.type === 'folder' ? `<span class="col-chevron">${ICONS.chevronRight}</span>` : '') +
+      (item.state === 'found' ? `<span class="col-score${animate ? ' pre' : ''}">${item.score.toFixed(2)}</span>` : '') +
+      `<span class="col-connector">${ICONS.arrowRight}</span>`;
+    if (!animate) {
+      if (item.state === 'skipped') el.classList.add('skip');
+      if (item.onPath) el.classList.add('active');
+      setHeat(el, item.score, item.state);
     }
-    document.getElementById('detailCardHead').textContent = name;
-    document.getElementById('detailCardName').textContent = name;
-    document.getElementById('detailCardExt').textContent  = ext;
-    document.getElementById('detailCardScore').textContent = `★ ${score.toFixed(3)}`;
-    document.getElementById('detailCardSize').textContent = size;
-    document.getElementById('detailCardDate').textContent = date;
-    // AIガイドパスライン: スコア >= 0.8 のみ表示
-    document.getElementById('detailCardGlow').style.display = score >= 0.8 ? '' : 'none';
-  }
-
-  /* ── ペイン分割リサイザー ── */
-  const paneResizer = document.getElementById('resizer');
-  const leftPane    = document.getElementById('leftPane');
-  let paneResizing  = false, paneStartX, paneStartW;
-
-  paneResizer.addEventListener('mousedown', e => {
-    paneResizing = true;
-    paneStartX   = e.clientX;
-    paneStartW   = leftPane.getBoundingClientRect().width;
-    paneResizer.classList.add('dragging');
-    document.body.style.cursor    = 'col-resize';
-    document.body.style.userSelect = 'none';
+    el.addEventListener('click', () => onItemActivate(depth, itemIdx));
+    body.appendChild(el);
   });
-
-  /* ── 列幅 ── */
-  const colWidths = { folder: 150, size: 60, date: 86 };
-
-  function applyColWidths() {
-    document.querySelectorAll('.rc-folder').forEach(el => el.style.width = colWidths.folder + 'px');
-    document.querySelectorAll('.rc-size').forEach(el   => el.style.width = colWidths.size   + 'px');
-    document.querySelectorAll('.rc-date').forEach(el   => el.style.width = colWidths.date   + 'px');
-    document.getElementById('col-wrap-folder').style.width = colWidths.folder + 'px';
-    document.getElementById('col-wrap-size').style.width   = colWidths.size   + 'px';
-    document.getElementById('col-wrap-date').style.width   = colWidths.date   + 'px';
+  // ガイドパスライン: 確定パス末端フォルダ（Button）の children カラムにのみ置く
+  if (col.node === DEFAULT_LEAF) {
+    const glow = document.createElement('div');
+    glow.className = 'guide-path-glow';
+    body.appendChild(glow);
   }
-  applyColWidths();
+  panel.appendChild(body);
+  return panel;
+}
 
-  /* ── 列リサイザー ── */
-  let colResizing = null, colStartX, colStartW;
+/* パネル入場アニメーション（demo / 対話ナビ共通）。
+   finalStates=true（対話ナビ）では skip/heat を即時適用する。
+   demo（false）では skipped の点灯を markSkip がログと同期して後追いする。 */
+function animateColumnIn(panel, col, finalStates) {
+  const items = [...panel.querySelectorAll('.col-item')];
+  // 挿入直後に再フローを強制してからクラスを外し、transform/opacity の遷移として点灯させる
+  void panel.offsetWidth;
+  panel.classList.remove('pre'); panel.classList.add('in');
+  items.forEach((el, i) => {
+    el.style.transitionDelay = (i * 40) + 'ms';
+    el.classList.remove('pre'); el.classList.add('in');
+    const item = col.items[i];
+    if (finalStates && item.state === 'skipped') el.classList.add('skip');
+    if (finalStates || item.state !== 'skipped') setHeat(el, item.score, item.state);
+    const pill = el.querySelector('.col-score');
+    if (pill) { pill.style.transitionDelay = (i * 50 + 150) + 'ms'; pill.classList.remove('pre'); }
+  });
+  // 入場後は hover 遷移に delay が残らないよう除去
+  setTimeout(() => items.forEach(el => {
+    el.style.transitionDelay = '';
+    const pill = el.querySelector('.col-score');
+    if (pill) pill.style.transitionDelay = '';
+  }), 800);
+}
 
-  document.querySelectorAll('.col-resizer').forEach(r => {
-    r.addEventListener('mousedown', e => {
-      e.stopPropagation();
-      colResizing = r.dataset.resizer;
-      colStartX   = e.clientX;
-      colStartW   = colWidths[colResizing];
-      r.classList.add('dragging');
-      document.body.style.cursor    = 'col-resize';
-      document.body.style.userSelect = 'none';
+/* demo タイムライン用: COLUMNS[idx] を追加（navPath も同期） */
+function addColumn(idx, animate) {
+  const col = COLUMNS[idx];
+  const panel = buildColumn(col, idx, animate);
+  columnsScroll.appendChild(panel);
+  state.navPath = COL_NODES_DEFAULT.slice(0, idx + 1);
+  if (animate) animateColumnIn(panel, col);
+  columnsScroll.scrollLeft = columnsScroll.scrollWidth;
+  return panel;
+}
+
+/* 対話ナビ用: 任意ノードの children カラムを追加 */
+function appendColumnNode(node, depth, animate) {
+  const col = colObjFor(node, depth);
+  const panel = buildColumn(col, depth, animate);
+  columnsScroll.appendChild(panel);
+  if (animate) animateColumnIn(panel, col, true);  // skip/heat を即時適用
+  columnsScroll.scrollLeft = columnsScroll.scrollWidth;
+  return panel;
+}
+
+/* 指定 depth 以降のカラムを除去。
+   退場パネルを flex に残すと直後に積む新カラムが後ろへ回り込み順序が崩れるため、
+   即時に切り離す。入れ替わりの動きは新カラム側の slide-in（appendColumnNode）が担う。 */
+function truncateColumns(keep) {
+  while (columnsScroll.children.length > keep) {
+    columnsScroll.lastElementChild.remove();
+  }
+}
+
+/* カラム ci 内の itemIdx を選択強調（同カラムの他項目は解除） */
+function setColumnActive(ci, itemIdx) {
+  const panel = columnsScroll.children[ci];
+  if (!panel) return;
+  panel.querySelectorAll('.col-item').forEach((el, i) =>
+    el.classList.toggle('active', i === itemIdx));
+}
+
+/* 項目クリック: フォルダ→下階層カラムへ潜る / ファイル→選択してプレビュー */
+function onItemActivate(ci, itemIdx) {
+  const node = state.navPath[ci];
+  if (!node || !node.children) return;
+  const item = node.children[itemIdx];
+  if (!item) return;
+
+  if (item.type === 'folder') {
+    if (item.state === 'skipped') {} // A*ではスキップ扱いだが、対話的には掘れるようにする
+    setColumnActive(ci, itemIdx);
+    // 既に同じフォルダを開いているなら何もしない（多重展開防止）
+    if (state.navPath[ci + 1] === item && columnsScroll.children[ci + 1]) return;
+    state.navPath = state.navPath.slice(0, ci + 1);
+    state.navPath.push(item);
+    truncateColumns(ci + 1);
+    appendColumnNode(item, ci + 1, !RM.matches);
+    syncGuideGlow();
+  } else {
+    // ファイル選択: より深いカラムは畳む（Finder挙動）
+    setColumnActive(ci, itemIdx);
+    state.navPath = state.navPath.slice(0, ci + 1);
+    truncateColumns(ci + 1);
+    const el = columnsScroll.children[ci].querySelectorAll('.col-item')[itemIdx];
+    selectFile(el.dataset.fileId);
+    syncGuideGlow();
+  }
+}
+
+/* 現在の右端カラムが確定パス末端のときだけ、選択ファイルに応じてグローを点灯 */
+function syncGuideGlow() {
+  const glow = columnsScroll.querySelector('.guide-path-glow');
+  if (!glow) return;
+  const f = FILES.find(x => x.id === state.selectedId);
+  glow.classList.toggle('on', !!f && f.score >= 0.8);
+}
+
+function renderColumnsFinal() {
+  columnsScroll.innerHTML = '';
+  COL_NODES_DEFAULT.forEach((node, i) => {
+    const col = colObjFor(node, i);
+    const panel = buildColumn(col, i, false);
+    columnsScroll.appendChild(panel);
+  });
+  state.navPath = COL_NODES_DEFAULT.slice();
+  const glow = columnsScroll.querySelector('.guide-path-glow');
+  if (glow) glow.classList.add('on');
+}
+
+function markSkip(colIdx, itemIdx) {
+  const panel = columnsScroll.children[colIdx];
+  if (!panel) return;
+  const el = panel.querySelectorAll('.col-item')[itemIdx];
+  if (!el) return;
+  el.classList.add('skip');
+  setHeat(el, COLUMNS[colIdx].items[itemIdx].score, 'skipped');
+}
+
+/* 確定パスの連鎖点灯（80ms間隔）→ 末尾でガイドラインが発光 */
+function lightPath() {
+  COLUMNS.forEach((col, ci) => {
+    const ii = col.items.findIndex(it => it.onPath);
+    if (ii < 0) return;
+    schedule(ci * 80, () => {
+      const panel = columnsScroll.children[ci];
+      const el = panel && panel.querySelectorAll('.col-item')[ii];
+      if (el) el.classList.add('active');
     });
   });
+  schedule(COLUMNS.length * 80 + 80, () => {
+    const glow = columnsScroll.querySelector('.guide-path-glow');
+    if (glow) glow.classList.add('on');
+  });
+}
 
-  /* ── ソート ── */
-  let sortCol = 'name', sortAsc = true;
+/* ── プレビュー ── */
+let previewTimer = null;
 
-  function sortBy(col) {
-    if (sortCol === col) sortAsc = !sortAsc;
-    else { sortCol = col; sortAsc = true; }
-    updateSortIndicators();
-
-    const list = document.querySelector('.file-list');
-    const rows = [...list.querySelectorAll('.file-row')];
-    rows.sort((a, b) => {
-      let va, vb;
-      if (col === 'name')   { va = a.querySelector('.file-text').textContent;           vb = b.querySelector('.file-text').textContent; }
-      if (col === 'folder') { va = a.querySelector('.folder-col').textContent;          vb = b.querySelector('.folder-col').textContent; }
-      if (col === 'size')   { va = parseFloat(a.querySelector('.size-col').textContent); vb = parseFloat(b.querySelector('.size-col').textContent); }
-      if (col === 'date')   { va = a.querySelector('.date-col').textContent;            vb = b.querySelector('.date-col').textContent; }
-      if (va < vb) return sortAsc ? -1 : 1;
-      if (va > vb) return sortAsc ?  1 : -1;
-      return 0;
-    });
-    rows.forEach(r => list.appendChild(r));
+/* fileId からツリー上のノード連鎖 [root, …folders, file] を探す（左リスト選択時のナビ復元用） */
+function pathToFile(fileId) {
+  const stack = [];
+  function dfs(node) {
+    stack.push(node);
+    if (node.type === 'file' && node.fileId === fileId) return true;
+    if (node.children) for (const c of node.children) { if (dfs(c)) return true; }
+    stack.pop();
+    return false;
   }
+  return dfs(TREE) ? stack.slice() : null;
+}
 
-  function updateSortIndicators() {
-    const idMap = { name: 'col-h-name', folder: 'col-h-folder', size: 'col-h-size', date: 'col-h-date' };
-    document.querySelectorAll('.col-h').forEach(h => {
-      h.classList.remove('sorted');
-      const a = h.querySelector('.sort-arrow');
-      if (a) a.textContent = '';
-    });
-    const target = document.getElementById(idMap[sortCol]);
-    if (target) {
-      target.classList.add('sorted');
-      let a = target.querySelector('.sort-arrow');
-      if (!a) { a = document.createElement('span'); a.className = 'sort-arrow'; target.appendChild(a); }
-      a.textContent = sortAsc ? '↑' : '↓';
+/* 左リストからの選択時、中央カラムをそのファイルのツリーパスへ追従させる */
+function navigateColumnsToFile(fileId) {
+  const chain = pathToFile(fileId);
+  if (!chain) return false;                          // ツリー外（合成データ）のファイルは追従しない
+  const folders = chain.slice(0, -1);                // root..親フォルダ
+  // 既存カラムと一致する深さまでは保持し、分岐点以降だけ作り直す（無駄な再描画を避ける）
+  let diverge = folders.length;
+  for (let i = 0; i < folders.length; i++) {
+    if (state.navPath[i] !== folders[i]) { diverge = i; break; }
+  }
+  if (diverge < state.navPath.length || columnsScroll.children.length !== folders.length) {
+    truncateColumns(diverge);
+    for (let i = diverge; i < folders.length; i++) {
+      appendColumnNode(folders[i], i, !RM.matches);
     }
+    state.navPath = folders.slice();
   }
+  return true;
+}
 
-  /* ── ハンバーガーメニュー ── */
-  const titlebarMenu  = document.getElementById('titlebarMenu');
-  const menuHamburger = document.getElementById('menuHamburger');
-  const menuDropdown  = document.getElementById('menuDropdown');
-
-  function toggleMenuDropdown() { menuDropdown.classList.toggle('open'); }
-
-  document.addEventListener('click', e => {
-    if (!menuHamburger.contains(e.target) && !menuDropdown.contains(e.target))
-      menuDropdown.classList.remove('open');
+function selectFile(id, instant, fromList) {
+  state.selectedId = id;
+  fileList.querySelectorAll('.file-row').forEach(r =>
+    r.classList.toggle('selected', r.dataset.id === id));
+  // 左リスト発の選択は中央カラムをそのファイルのパスへ追従させる
+  if (fromList) navigateColumnsToFile(id);
+  // 表示中の全カラムから該当ファイル項目を強調（他は解除）
+  const f = FILES.find(x => x.id === id);
+  columnsScroll.querySelectorAll('.col-item').forEach(el => {
+    if (el.dataset.fileId) el.classList.toggle('active', el.dataset.fileId === id);
   });
+  syncGuideGlow();
+  clearTimeout(previewTimer);
+  if (instant || RM.matches) { renderPreview(id, true); return; }
+  // 選択デバウンス模擬（backend.md §6: 100〜150ms）。連続選択は前回タイマーをキャンセル
+  previewPane.innerHTML = `<div class="pv-skel">` +
+    [90, 75, 85, 60, 80, 70, 40].map(w => `<span class="sk-block" style="width:${w}%"></span>`).join('') +
+    `</div>`;
+  previewTimer = setTimeout(() => renderPreview(id, false), 150);
+}
 
-  function checkMenuOverflow() {
-    const titlebar = document.querySelector('.titlebar');
-    const logo     = document.querySelector('.titlebar-logo');
-    const search   = document.querySelector('.titlebar-search-center');
-    const winctrls = document.querySelector('.titlebar-winctrls');
-    const available = titlebar.getBoundingClientRect().width
-                    - logo.getBoundingClientRect().width
-                    - winctrls.getBoundingClientRect().width
-                    - search.getBoundingClientRect().width
-                    - 32;
-    let totalW = 0;
-    titlebarMenu.querySelectorAll('.menu-btn').forEach(b => { totalW += b.getBoundingClientRect().width || 80; });
-    if (totalW > available) {
-      titlebarMenu.style.display  = 'none';
-      menuHamburger.style.display = 'flex';
-    } else {
-      titlebarMenu.style.display  = 'flex';
-      menuHamburger.style.display = 'none';
-      menuDropdown.classList.remove('open');
-    }
+function renderPreview(id, instant) {
+  const f = FILES.find(x => x.id === id);
+  const pv = PREVIEWS[id];
+  if (!f || !pv) { previewPane.innerHTML = EMPTY_PREVIEW; return; }
+  const fullPath = 'C:\\' + f.folder + '\\' + f.name;
+
+  let bodyHtml;
+  if (pv.type === 'code') {
+    bodyHtml = `<div class="pv-code">` + pv.lines.map((l, i) =>
+      `<div class="pv-line"><span class="pv-ln">${i + 1}</span><span class="pv-tx">${l}</span></div>`).join('') +
+      `</div>`;
+  } else if (pv.type === 'markdown') {
+    bodyHtml = `<div class="pv-md">${pv.html}</div>`;
+  } else {
+    bodyHtml = `<div class="empty-state"><div class="empty-icon">${ICONS.fileGeneric}</div>` +
+      `<div class="empty-title">プレビュー非対応の形式です</div>` +
+      `<div class="empty-hint"><span class="pv-format">${pv.format} — ${pv.note}</span></div></div>`;
   }
+  const guideHtml = f.score >= 0.8
+    ? `<div class="preview-guide">${ICONS.spark}<span>AIガイド: 高一致ルート</span><span class="guide-line"></span></div>`
+    : '';
+  const truncHtml = pv.truncated
+    ? `<div class="preview-trunc">${ICONS.warning}<span>先頭 64KB のみ表示しています（全体 ${f.size}）</span></div>`
+    : '';
+  const scoreStyle = `--heat-bg:${heatBg(f.score)};--heat-text:${heatText(f.score)}`;
 
-  new ResizeObserver(checkMenuOverflow).observe(document.querySelector('.titlebar'));
-  checkMenuOverflow();
+  previewPane.innerHTML =
+    `<div class="pv-view${instant ? '' : ' pre'}">` +
+      `<div class="preview-header">${extBadge(f.ext)}<div class="preview-title">` +
+        `<div class="preview-filename">${f.name}</div>` +
+        `<div class="preview-path" title="${fullPath}">${fullPath}</div></div></div>` +
+      `<div class="preview-meta">` +
+        `<div class="meta-chip"><span class="meta-k">スコア</span><span class="score-pill" style="${scoreStyle}">${f.score.toFixed(2)}</span></div>` +
+        `<div class="meta-chip"><span class="meta-k">サイズ</span><span class="meta-v">${f.size}</span></div>` +
+        `<div class="meta-chip"><span class="meta-k">更新</span><span class="meta-v">${f.date}</span></div>` +
+        `<div class="meta-chip"><span class="meta-k">形式</span><span class="meta-v">${f.ext}</span></div>` +
+      `</div>` +
+      guideHtml +
+      `<div class="preview-body">${bodyHtml}</div>` +
+      truncHtml +
+    `</div>`;
+  if (!instant) {
+    const view = previewPane.firstElementChild;
+    void view.offsetWidth; // 再フロー強制でトランジション発火
+    view.classList.remove('pre');
+  }
+}
 
-  /* ── mousemove / mouseup 統合 ── */
+/* ── ステータスバー ── */
+function setPhase(text) { statusPhase.textContent = text; }
+function setNote(text)  { statusNote.textContent = text; }
+function setDot(mode)   { statusDot.classList.toggle('loading', mode === 'loading'); }
+function setCounts(o, s, f) {
+  statusCounts.innerHTML = (o === null) ? '' :
+    `展開 <b>${o}</b> ・ スキップ <b>${s}</b> ・ 発見 <b>${f}</b>`;
+}
+const counts = { o: 0, s: 0, f: 0 };
+function bumpCount(key) { counts[key]++; setCounts(counts.o, counts.s, counts.f); }
+
+function logEntry(text, type) {
+  const span = document.createElement('span');
+  span.className = `entry log-${type} pre`;
+  span.textContent = text;
+  statusLog.replaceChildren(span);
+  void statusLog.offsetWidth; // 再フロー強制でトランジション発火
+  span.classList.remove('pre');
+}
+
+/* 経過msカウンタ: 実速度<200msに対する意図的スロー再生のためrAFでカウントアップ演出 */
+function startMs(duration, target) {
+  const t0 = performance.now();
+  const tick = now => {
+    const p = Math.min((now - t0) / duration, 1);
+    const ease = 1 - Math.pow(1 - p, 3);
+    statusMs.textContent = Math.round(target * ease) + 'ms';
+    if (p < 1) demo.raf = requestAnimationFrame(tick);
+  };
+  demo.raf = requestAnimationFrame(tick);
+}
+
+/* ═══════════════════════════════════════
+   SECTION J3: インタラクション（リサイズ・ソート・メニュー）
+═══════════════════════════════════════ */
+
+/* ペイン分割リサイザー（左: dx そのまま / 右: dx 符号反転） */
+function setupResizer(handle, pane, sign, minW, maxRatio) {
+  let startX = 0, startW = 0, active = false;
+  handle.addEventListener('mousedown', e => {
+    active = true;
+    startX = e.clientX;
+    startW = pane.getBoundingClientRect().width;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+  });
   document.addEventListener('mousemove', e => {
-    if (paneResizing) {
-      const dx = e.clientX - paneStartX;
-      const nw = Math.min(Math.max(paneStartW + dx, 200), window.innerWidth - 280);
-      leftPane.style.width = nw + 'px';
-      document.documentElement.style.setProperty('--left-w', nw + 'px');
-    }
-    if (colResizing) {
-      const dx  = e.clientX - colStartX;
-      const min = { folder: 80, size: 40, date: 60 }[colResizing];
-      colWidths[colResizing] = Math.max(colStartW + dx, min);
-      applyColWidths();
-    }
+    if (!active) return;
+    const w = Math.min(Math.max(startW + sign * (e.clientX - startX), minW), window.innerWidth * maxRatio);
+    pane.style.width = w + 'px';
   });
-
   document.addEventListener('mouseup', () => {
-    if (paneResizing) {
-      paneResizing = false;
-      paneResizer.classList.remove('dragging');
-      document.body.style.cursor = document.body.style.userSelect = '';
-    }
-    if (colResizing) {
-      document.querySelectorAll('.col-resizer').forEach(r => r.classList.remove('dragging'));
-      colResizing = null;
-      document.body.style.cursor = document.body.style.userSelect = '';
-    }
+    if (!active) return;
+    active = false;
+    handle.classList.remove('dragging');
+    document.body.style.cursor = '';
   });
+}
+setupResizer($('resizerL'), leftPane, 1, 240, 0.36);
+setupResizer($('resizerR'), previewPane, -1, 300, 0.42);
+
+/* 左ペイン幅に応じてサイズ・日付列の表示を切替 */
+new ResizeObserver(entries => {
+  const w = entries[0].contentRect.width;
+  leftPane.classList.toggle('w-md', w >= 380);
+  leftPane.classList.toggle('w-lg', w >= 460);
+}).observe(leftPane);
+
+/* ソート */
+const headerBtns = document.querySelectorAll('.col-h');
+headerBtns.forEach(btn => {
+  btn.querySelector('.sort-ico').innerHTML = ICONS.sortArrow;
+  btn.addEventListener('click', () => sortBy(btn.dataset.sort));
+});
+function sortBy(col) {
+  if (state.sortCol === col) state.sortAsc = !state.sortAsc;
+  else { state.sortCol = col; state.sortAsc = col !== 'score'; } // スコアのみ降順を既定にする
+  const dir = state.sortAsc ? 1 : -1;
+  state.files.sort((a, b) => {
+    let va, vb;
+    if (col === 'name')        { va = a.name.toLowerCase();   vb = b.name.toLowerCase(); }
+    else if (col === 'folder') { va = a.folder.toLowerCase(); vb = b.folder.toLowerCase(); }
+    else if (col === 'size')   { va = a.sizeKB; vb = b.sizeKB; }
+    else if (col === 'date')   { va = a.date;   vb = b.date; }
+    else                       { va = a.score;  vb = b.score; }
+    return va < vb ? -dir : va > vb ? dir : 0;
+  });
+  headerBtns.forEach(b => {
+    const on = b.dataset.sort === col;
+    b.classList.toggle('sorted', on);
+    b.classList.toggle('desc', on && !state.sortAsc);
+  });
+  if (state.hasResults) renderResults({});
+}
+
+/* タイトルバーメニューの縮退（幅不足時はハンバーガーへ） */
+const titlebarMenu  = $('titlebarMenu');
+const menuHamburger = $('menuHamburger');
+const menuDropdown  = $('menuDropdown');
+menuHamburger.addEventListener('click', () => menuDropdown.classList.toggle('open'));
+document.addEventListener('click', e => {
+  if (!menuHamburger.contains(e.target) && !menuDropdown.contains(e.target))
+    menuDropdown.classList.remove('open');
+});
+function checkMenuOverflow() {
+  const logo   = document.querySelector('.titlebar-logo');
+  const search = document.querySelector('.titlebar-search-center');
+  // 検索ボックスは中央固定（absolute）のため、メニューが使えるのは
+  // ロゴ右端〜検索ボックス左端の間だけ。全幅からの引き算では重なりを検出できない
+  const available = search.getBoundingClientRect().left
+                  - logo.getBoundingClientRect().right
+                  - 16;
+  let totalW = 0;
+  // display:none 時に幅0となり判定が振動するため、フォールバック幅80pxで安定化
+  titlebarMenu.querySelectorAll('.menu-btn').forEach(b => { totalW += b.getBoundingClientRect().width || 80; });
+  if (totalW > available) {
+    titlebarMenu.style.display  = 'none';
+    menuHamburger.style.display = 'flex';
+  } else {
+    titlebarMenu.style.display  = 'flex';
+    menuHamburger.style.display = 'none';
+    menuDropdown.classList.remove('open');
+  }
+}
+new ResizeObserver(checkMenuOverflow).observe(document.querySelector('.titlebar'));
+
+/* ═══════════════════════════════════════
+   SECTION J3b: 表示メニュー（左ペイン表示モード）
+═══════════════════════════════════════ */
+const viewPopup    = $('viewPopup');
+const menuBtnView  = $('menuBtnView');
+const menuBtnViewH = $('menuBtnViewH');
+const LS_KEY = 'treescout.viewMode';
+
+let viewMode = localStorage.getItem(LS_KEY) || 'standard';
+let viewPopupOpen = false;
+
+function applyViewMode(mode) {
+  viewMode = mode;
+  leftPane.classList.remove('view-compact', 'view-detail');
+  if (mode === 'compact') leftPane.classList.add('view-compact');
+  if (mode === 'detail')  leftPane.classList.add('view-detail');
+  viewPopup.querySelectorAll('.view-popup-item').forEach(btn => {
+    btn.setAttribute('aria-checked', String(btn.dataset.mode === mode));
+  });
+  localStorage.setItem(LS_KEY, mode);
+}
+
+function openViewPopup(anchorBtn) {
+  if (viewPopupOpen) { closeViewPopup(); return; }
+  const rect = anchorBtn.getBoundingClientRect();
+  viewPopup.removeAttribute('hidden');
+  viewPopup.style.top  = rect.bottom + 'px';
+  viewPopup.style.left = rect.left + 'px';
+  void viewPopup.offsetWidth; // reflow で transition を確実に発火
+  const maxLeft = window.innerWidth - viewPopup.offsetWidth - 4;
+  if (parseFloat(viewPopup.style.left) > maxLeft)
+    viewPopup.style.left = maxLeft + 'px';
+  viewPopup.classList.add('open');
+  viewPopupOpen = true;
+  [menuBtnView, menuBtnViewH].forEach(b => b && b.setAttribute('aria-expanded', 'true'));
+  (viewPopup.querySelector(`[data-mode="${viewMode}"]`)
+   || viewPopup.querySelector('.view-popup-item')).focus();
+}
+
+function closeViewPopup() {
+  if (!viewPopupOpen) return;
+  viewPopup.classList.remove('open');
+  viewPopupOpen = false;
+  [menuBtnView, menuBtnViewH].forEach(b => b && b.setAttribute('aria-expanded', 'false'));
+  const dur = parseFloat(getComputedStyle(viewPopup).transitionDuration) * 1000 || 120;
+  setTimeout(() => { if (!viewPopupOpen) viewPopup.setAttribute('hidden', ''); }, dur);
+}
+
+viewPopup.querySelectorAll('.view-popup-item').forEach(btn => {
+  btn.addEventListener('click', () => { applyViewMode(btn.dataset.mode); closeViewPopup(); });
+});
+
+function onViewBtnClick(e) {
+  e.stopPropagation();
+  openViewPopup(e.currentTarget);
+}
+menuBtnView  && menuBtnView.addEventListener('click', onViewBtnClick);
+menuBtnViewH && menuBtnViewH.addEventListener('click', onViewBtnClick);
+
+document.addEventListener('click', e => {
+  if (viewPopupOpen
+      && !viewPopup.contains(e.target)
+      && e.target !== menuBtnView
+      && e.target !== menuBtnViewH)
+    closeViewPopup();
+});
+
+/* プレビュー折りたたみ */
+const previewToggle = $('previewToggle');
+previewToggle.innerHTML = ICONS.panelRight;
+function togglePreview() {
+  const collapsed = document.body.classList.toggle('preview-collapsed');
+  previewToggle.setAttribute('aria-pressed', String(!collapsed));
+}
+previewToggle.addEventListener('click', togglePreview);
+
+/* ═══════════════════════════════════════
+   SECTION J4: デモタイムラインエンジン
+═══════════════════════════════════════ */
+const demo = { timers: [], raf: null, running: false };
+function schedule(t, fn) { demo.timers.push(setTimeout(fn, t)); }
+function cancelDemo() {
+  demo.timers.forEach(clearTimeout);
+  demo.timers = [];
+  if (demo.raf) cancelAnimationFrame(demo.raf);
+  demo.raf = null;
+  demo.running = false;
+  clearTimeout(previewTimer);
+  searchWrap.classList.remove('loading');
+}
+
+/* デモ再生（実速度<200msの約10倍スロー）。Enter連打は cancelDemo で多重再生を防ぐ */
+function runDemo() {
+  cancelDemo();
+  if (RM.matches) { renderFinal(); return; } // reduced-motion: 最終状態を即時描画
+  demo.running = true;
+  state.selectedId = null;
+
+  /* t=0: クリア＋Phase 1 */
+  columnsScroll.innerHTML = '';
+  previewPane.innerHTML = EMPTY_PREVIEW;
+  renderSkeleton();
+  counts.o = counts.s = counts.f = 0;
+  setCounts(0, 0, 0);
+  setDot('loading');
+  setPhase('Phase 1: Everything 絞り込み…');
+  setNote('');
+  statusLog.replaceChildren();
+  statusMs.textContent = '0ms';
+  searchWrap.classList.add('loading');
+  startMs(2000, 182);
+
+  schedule(250,  () => logEntry('候補 812件 → 仮想ツリー構築', 'info'));
+  schedule(400,  () => { setPhase('Phase 2: A*探索…'); addColumn(0, true); });
+  schedule(460,  () => { logEntry('opened   src/   h=0.95', 'open');  bumpCount('o'); });
+  schedule(540,  () => { logEntry('skipped  docs/   h=0.30', 'skip'); markSkip(0, 1); bumpCount('s'); });
+  schedule(620,  () => { logEntry('skipped  tests/   h=0.12', 'skip'); markSkip(0, 2); bumpCount('s'); });
+  schedule(700,  () => { addColumn(1, true); logEntry('opened   components/   h=0.95', 'open'); bumpCount('o'); });
+  schedule(780,  () => { logEntry('skipped  utils/   h=0.10', 'skip'); markSkip(1, 2); bumpCount('s'); });
+  schedule(1000, () => { addColumn(2, true); logEntry('opened   Button/   h=0.95', 'open'); bumpCount('o'); });
+  schedule(1080, () => { logEntry('opened   hooks/   h=0.70', 'open'); bumpCount('o'); });
+  schedule(1300, () => addColumn(3, true));
+  schedule(1350, () => { logEntry('found    ButtonGroup.tsx   f=0.95', 'found'); bumpCount('f'); });
+  schedule(1400, () => { logEntry('found    Button.tsx   f=0.92', 'found'); bumpCount('f'); });
+  schedule(1450, () => { logEntry('found    ButtonIcon.tsx   f=0.80', 'found'); bumpCount('f'); });
+  schedule(1500, () => { logEntry('found    useButton.ts   f=0.71', 'found'); bumpCount('f'); });
+  schedule(1600, () => { renderResults({ stagger: true }); lightPath(); });
+  schedule(1650, () => {
+    demo.running = false;
+    setPhase('完了 — 12件 / 182ms');
+    setNote('(デモ: 約10倍スロー)');
+    setDot('done');
+    setCounts(12, 5, 12);
+    searchWrap.classList.remove('loading');
+  });
+  schedule(1750, () => selectFile('buttongroup'));
+}
+
+/* デモ完了後の最終状態を即時描画（初期表示・reduced-motion 用） */
+function renderFinal() {
+  cancelDemo();
+  state.selectedId = 'buttongroup';
+  renderResults({});
+  renderColumnsFinal();
+  setDot('done');
+  setPhase('完了 — 12件 / 182ms');
+  setNote('');
+  logEntry('found    ButtonGroup.tsx   f=0.95', 'found');
+  setCounts(12, 5, 12);
+  statusMs.textContent = '182ms';
+  selectFile('buttongroup', true);
+}
+
+/* 空状態へ戻す（Esc） */
+function resetToIdle() {
+  cancelDemo();
+  state.selectedId = null;
+  state.hasResults = false;
+  fileList.innerHTML = EMPTY_RESULTS;
+  columnsScroll.innerHTML = EMPTY_COLUMNS;
+  previewPane.innerHTML = EMPTY_PREVIEW;
+  setDot('idle');
+  setPhase('待機中');
+  setNote('');
+  statusLog.replaceChildren();
+  setCounts(null);
+  statusMs.textContent = '';
+}
+
+/* ═══════════════════════════════════════
+   SECTION J5: キーボード操作・ヒント
+═══════════════════════════════════════ */
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault();
+    searchInput.focus();
+    searchInput.select();
+    return;
+  }
+  if (e.ctrlKey && (e.key === 'p' || e.key === 'P')) {
+    e.preventDefault();
+    togglePreview();
+    return;
+  }
+  if (e.key === 'Escape') {
+    if (viewPopupOpen) { closeViewPopup(); return; }
+    if (document.activeElement === searchInput) searchInput.blur();
+    resetToIdle();
+    return;
+  }
+  // 表示ポップアップのキーボードナビ
+  if (viewPopupOpen) {
+    const items = [...viewPopup.querySelectorAll('.view-popup-item')];
+    const cur = items.findIndex(el => el === document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); items[(cur + 1) % items.length].focus(); return; }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); items[(cur - 1 + items.length) % items.length].focus(); return; }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (cur >= 0) { applyViewMode(items[cur].dataset.mode); closeViewPopup(); }
+      return;
+    }
+    if (e.key === 'Tab') { closeViewPopup(); return; }
+  }
+  // 中央カラムにフォーカスがある場合: Finder型のキーボードナビ（↑↓移動 / →開く / ←戻る / Enter）
+  const colItem = document.activeElement.closest && document.activeElement.closest('.col-item');
+  if (colItem && ['ArrowDown','ArrowUp','ArrowRight','ArrowLeft','Enter',' '].includes(e.key)) {
+    e.preventDefault();
+    handleColumnKey(e.key, colItem);
+    return;
+  }
+
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && state.hasResults
+      && document.activeElement.tagName !== 'INPUT') {
+    e.preventDefault();
+    const rows = [...fileList.querySelectorAll('.file-row')];
+    if (!rows.length) return;
+    const cur = rows.findIndex(r => r.dataset.id === state.selectedId);
+    const next = e.key === 'ArrowDown'
+      ? Math.min(cur + 1, rows.length - 1)
+      : Math.max(cur - 1, 0);
+    const row = rows[Math.max(next, 0)];
+    selectFile(row.dataset.id, false, true);
+    row.focus();
+    row.scrollIntoView({ block: 'nearest' });
+  }
+});
+
+/* 中央カラムのキーボード操作 */
+function handleColumnKey(key, colItem) {
+  const panel = colItem.closest('.col-panel');
+  const ci = [...columnsScroll.children].indexOf(panel);
+  const items = [...panel.querySelectorAll('.col-item')];
+  const idx = items.indexOf(colItem);
+  if (key === 'ArrowDown' || key === 'ArrowUp') {
+    const next = key === 'ArrowDown'
+      ? Math.min(idx + 1, items.length - 1)
+      : Math.max(idx - 1, 0);
+    items[next].focus();
+    items[next].scrollIntoView({ block: 'nearest' });
+  } else if (key === 'ArrowRight' || key === 'Enter' || key === ' ') {
+    const node = state.navPath[ci];
+    const item = node && node.children && node.children[idx];
+    if (!item) return;
+    onItemActivate(ci, idx);
+    // フォルダを開いたら新カラムの先頭へフォーカスを送る
+    if (item.type === 'folder') {
+      const nextPanel = columnsScroll.children[ci + 1];
+      const first = nextPanel && nextPanel.querySelector('.col-item');
+      if (first) first.focus();
+    }
+  } else if (key === 'ArrowLeft') {
+    // 親カラムの「このカラムを開いた項目」へフォーカスを戻す
+    const prev = columnsScroll.children[ci - 1];
+    if (!prev) return;
+    const parentNode = state.navPath[ci - 1];
+    const openedIdx = parentNode.children.indexOf(state.navPath[ci]);
+    const target = prev.querySelectorAll('.col-item')[openedIdx >= 0 ? openedIdx : 0];
+    if (target) target.focus();
+  }
+}
+
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); runDemo(); }
+});
+
+/* ── 探索スコープ（ブレッドクラム） ──
+   既定は全体検索。フォルダ限定時のみパスチップ＋× を表示する。
+   選択＝即適用のため別途「適用」操作は持たない（プライマリCTAは検索バーに一本化）。 */
+const scopeChip  = $('scopeChip'),  scopeIco   = $('scopeIco');
+const scopeText  = $('scopeText'),  scopeClear = $('scopeClear');
+const scopePick  = $('scopePick');
+let scopePath = '';
+
+function renderScope() {
+  if (scopePath) {
+    scopeChip.classList.remove('scope-chip-all');
+    scopeChip.title = scopePath;
+    scopeIco.innerHTML = ICONS.folder;
+    scopeText.textContent = scopePath;
+    scopeClear.hidden = false;
+  } else {
+    scopeChip.classList.add('scope-chip-all');
+    scopeChip.title = 'ドライブ全体を検索中';
+    scopeIco.innerHTML = ICONS.globe;
+    scopeText.textContent = '全体';
+    scopeClear.hidden = true;
+  }
+}
+scopeClear.innerHTML = ICONS.x;
+scopePick.innerHTML  = ICONS.folder;
+// モックではダイアログの代わりにサンプルパスを設定。選択＝即デモ再生（=即検索）
+scopePick.addEventListener('click', () => { scopePath = 'C:\\src'; renderScope(); runDemo(); });
+scopeClear.addEventListener('click', () => { scopePath = ''; renderScope(); });
+renderScope();
+
+/* 検索ボックスのkbdチップ: フォーカス中は Enter を促す */
+searchInput.addEventListener('focus', () => { searchKbd.innerHTML = '<kbd>Enter</kbd>'; });
+searchInput.addEventListener('blur',  () => { searchKbd.innerHTML = '<kbd>Ctrl</kbd><kbd>K</kbd>'; });
+
+/* ステータスバー右端のコンテキスト連動ヒント */
+function setHints(mode) {
+  statusHints.innerHTML = mode === 'list'
+    ? '<span class="hint"><kbd>↑</kbd><kbd>↓</kbd> 移動</span><span class="hint"><kbd>Ctrl</kbd><kbd>P</kbd> プレビュー</span>'
+    : '<span class="hint"><kbd>Ctrl</kbd><kbd>K</kbd> 検索</span><span class="hint"><kbd>Enter</kbd> デモ再生</span>';
+}
+document.addEventListener('focusin', e => {
+  setHints(e.target.closest && e.target.closest('.file-list') ? 'list' : 'default');
+});
+
+/* ═══════════════════════════════════════
+   初期化: デモ完了後の状態を静的表示（モックとして全要素を見せる）
+═══════════════════════════════════════ */
+$('searchIcon').innerHTML = ICONS.search;
+setHints('default');
+checkMenuOverflow();
+applyViewMode(viewMode);
+renderFinal();
+// ?demo 付きで開くと探索デモを自動再生（動作確認用）
+if (location.search.includes('demo')) setTimeout(runDemo, 100);
 </script>
 </body>
 </html>
