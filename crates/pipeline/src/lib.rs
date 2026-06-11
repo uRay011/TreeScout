@@ -16,6 +16,7 @@
 //! テストは cross-platform で実行できる。
 
 mod error;
+pub mod scoring;
 pub use error::PipelineError;
 
 use std::path::PathBuf;
@@ -123,7 +124,7 @@ where
     fn fetch_candidates(&self, query: &str) -> Result<Vec<PathBuf>, PipelineError> {
         use search::search as ev_search;
 
-        let results = ev_search(query, self.config.everything_max)
+        let results = ev_search(query, self.config.everything_max, search::MatchOptions::default())
             .map_err(PipelineError::Everything)?;
         Ok(results.into_iter().map(|r| PathBuf::from(r.path)).collect())
     }

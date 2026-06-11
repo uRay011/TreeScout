@@ -9,6 +9,9 @@ astar     = { path = "../astar" }
 embedding = { path = "../embedding", default-features = false }
 thiserror = "2"
 
+[dev-dependencies]
+approx = "0.5"
+
 # Windows 専用: Everything FFI（cross-compile 対象外では空スタブになる）
 [target.'cfg(windows)'.dependencies]
 search = { path = "../search" }
