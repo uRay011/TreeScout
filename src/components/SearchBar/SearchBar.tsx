@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { Search } from "lucide-react";
 
 interface Props {
@@ -6,10 +6,14 @@ interface Props {
   onChange: (v: string) => void;
   onSubmit: () => void;
   isLoading: boolean;
+  /** 検索モード（AIセマンティック / 素のEverythingフィルタ） */
+  mode: "ai" | "filter";
+  onModeChange: (mode: "ai" | "filter") => void;
 }
 
-export function SearchBar({ value, onChange, onSubmit, isLoading }: Props) {
+export function SearchBar({ value, onChange, onSubmit, isLoading, mode, onModeChange }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [focused, setFocused] = useState(false);
 
   // Ctrl+F でフォーカス
   useEffect(() => {
@@ -26,6 +30,26 @@ export function SearchBar({ value, onChange, onSubmit, isLoading }: Props) {
 
   return (
     <div className="search-wrap" data-loading={isLoading}>
+      <div className="search-mode" role="group" aria-label="検索モード">
+        <button
+          type="button"
+          className={`search-mode-btn${mode === "ai" ? " active" : ""}`}
+          aria-pressed={mode === "ai"}
+          title="AIセマンティック検索：意味的に近い順で上位を抽出"
+          onClick={() => onModeChange("ai")}
+        >
+          AI
+        </button>
+        <button
+          type="button"
+          className={`search-mode-btn${mode === "filter" ? " active" : ""}`}
+          aria-pressed={mode === "filter"}
+          title="フィルタ：Everythingの名前一致を無制限に表示"
+          onClick={() => onModeChange("filter")}
+        >
+          フィルタ
+        </button>
+      </div>
       <Search
         className="search-icon"
         width={13}
@@ -49,7 +73,13 @@ export function SearchBar({ value, onChange, onSubmit, isLoading }: Props) {
             onSubmit();
           }
         }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
       />
+      <span className="search-kbd" aria-hidden>
+        {focused ? <kbd>Enter</kbd> : <><kbd>Ctrl</kbd><kbd>F</kbd></>}
+      </span>
+      <span className="search-loadbar" aria-hidden />
     </div>
   );
 }

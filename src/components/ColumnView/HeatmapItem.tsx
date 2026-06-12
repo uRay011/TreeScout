@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { ArrowRight, ChevronRight } from "lucide-react";
 import { AstarEntry } from "../../lib/tauri";
 import { heatmapStyle, scoreTier, TIER_LABELS } from "../../lib/heatmap";
 
@@ -30,13 +31,15 @@ interface Props {
   isActive: boolean;
   index: number;
   onSelect: (entry: AstarEntry) => void;
+  /** 検索キーワード未入力時はスコア0=「最低スコア」ではなく「スコアなし」として無着色にする */
+  hasScore: boolean;
 }
 
-export function HeatmapItem({ entry, isActive, index, onSelect }: Props) {
-  const heatStyle = heatmapStyle(entry.score);
+export function HeatmapItem({ entry, isActive, index, onSelect, hasScore }: Props) {
+  const heatStyle = hasScore ? heatmapStyle(entry.score, entry.kind) : undefined;
   const isSkipped = entry.kind === "skipped";
   const tier = scoreTier(entry.score);
-  const heatLabel = entry.kind === "found" ? `, ${TIER_LABELS[tier]}` : "";
+  const heatLabel = hasScore && entry.kind === "found" ? `, ${TIER_LABELS[tier]}` : "";
 
   return (
     <motion.button
@@ -48,7 +51,7 @@ export function HeatmapItem({ entry, isActive, index, onSelect }: Props) {
       onClick={() => onSelect(entry)}
       // 入場アニメーション: 左からスライドイン + フェード
       initial={{ opacity: 0, x: -8 }}
-      animate={{ opacity: isSkipped ? 0.35 : 1, x: 0 }}
+      animate={{ opacity: 1, x: 0 }}
       transition={{
         duration: 0.18,
         delay: index * 0.04,   // 30~50ms ずつずらしてスタッガー
@@ -58,48 +61,47 @@ export function HeatmapItem({ entry, isActive, index, onSelect }: Props) {
       style={{ position: "relative", width: "100%", textAlign: "left", ...heatStyle }}
     >
       {/* ヒートマップ背景オーバーレイ（色・最終濃度はCSS変数 --heat-bg / --heat-opacity 経由） */}
-      <motion.span
-        className="heat-overlay"
-        aria-hidden
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.25, delay: index * 0.04 }}
-      />
-
-      {/* アクティブパスライン（左端の光る縦線） */}
-      {isActive && (
+      {hasScore && (
         <motion.span
-          className="col-active-line"
+          className="heat-overlay"
           aria-hidden
-          initial={{ scaleY: 0 }}
-          animate={{ scaleY: 1 }}
-          transition={{ duration: 0.16, ease: "easeOut" }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.25, delay: index * 0.04 }}
         />
       )}
 
+      {/* 左端ヒートバー：面のopacityでは潰れる低スコア帯を輝度差で判別させる */}
+      {hasScore && <span className="item-heatbar" aria-hidden />}
+
       {/* アイコン */}
-      <span className="col-icon" style={{ zIndex: 1, flexShrink: 0 }}>
+      <span className="col-icon">
         {entry.is_dir
           ? <IconFolder color="#c69026" />
           : <IconFile   color={fileColor(entry.ext)} />}
       </span>
 
       {/* 名前 */}
-      <span className="col-name" style={{ zIndex: 1 }}>
+      <span className="col-name">
         {entry.name}
       </span>
 
       {/* フォルダ展開シェブロン */}
       {entry.is_dir && (
-        <span className="col-chevron" style={{ zIndex: 1 }}>›</span>
+        <span className="col-chevron" aria-hidden>
+          <ChevronRight width={10} height={10} strokeWidth={1.5} />
+        </span>
       )}
 
       {/* スコアバッジ（found のみ表示） */}
-      {entry.kind === "found" && (
-        <span className="col-score" style={{ zIndex: 1 }}>
-          ★{entry.score.toFixed(2)}
-        </span>
+      {hasScore && entry.kind === "found" && (
+        <span className="col-score">{entry.score.toFixed(2)}</span>
       )}
+
+      {/* アクティブパスのコネクタ（active時のみCSSで表示） */}
+      <span className="col-connector" aria-hidden>
+        <ArrowRight width={10} height={10} strokeWidth={1.5} />
+      </span>
     </motion.button>
   );
 }

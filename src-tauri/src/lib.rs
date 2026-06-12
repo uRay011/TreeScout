@@ -1,18 +1,100 @@
+use std::sync::Mutex;
+
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use astar::{AstarConfig, ExploreCallback};
 use nlp::parse_query;
-use pipeline::run_with_paths;
-use search::{SearchError, SearchResult as EvResult};
+use pipeline::{run_with_paths, scoring};
+use search::{MatchOptions, SearchError, SearchResult as EvResult};
+
+mod browse_session;
+use browse_session::{browse, fetch_window, BrowseState};
 
 mod folder_index;
 use folder_index::{index_folders_command, FolderIndexState};
 
 // ── Phase 1 既存コマンド（後方互換） ────────────────────────
-#[tauri::command]
-fn search_files(query: String, max: Option<u32>) -> Result<Vec<EvResult>, String> {
-    search::search(&query, max.unwrap_or(200)).map_err(|e| e.to_string())
+#[tauri::command(async)]
+fn search_files(query: String, max: Option<u32>, options: Option<MatchOptions>) -> Result<Vec<EvResult>, String> {
+    let gen = search::next_generation();
+    search::search(&query, max.unwrap_or(200), options.unwrap_or_default(), gen).map_err(|e| e.to_string())
+}
+
+// ── Phase 4: カラムUIのフォルダ展開 ──────────────────────────
+//
+// 中央ペインでフォルダを選択した際に直下の中身を一覧取得する。
+// Everything に依存せず std::fs で読むため非Windowsでも動作する。
+#[derive(Serialize)]
+struct DirEntryResult {
+    name: String,
+    path: String,
+    folder: String,
+    is_dir: bool,
+    ext: String,
+    /// 検索クエリに対する一致スコア（0.0〜1.0）。query 未指定時は 0.0。
+    /// 中央ペインの手動展開列にもヒート色を付けるために返す。
+    score: f32,
+}
+
+#[tauri::command(async)]
+fn list_directory(path: String, query: Option<String>) -> Result<Vec<DirEntryResult>, String> {
+    // query 指定時のみキーワードを抽出してスコアリングする（未指定＝無着色）
+    let (keywords, extensions): (Vec<String>, Vec<String>) = match query.filter(|q| !q.trim().is_empty()) {
+        Some(q) => {
+            let parsed = parse_query(&q);
+            (
+                parsed.keywords.iter().map(|s| s.to_lowercase()).collect(),
+                parsed.extensions.clone(),
+            )
+        }
+        None => (Vec::new(), Vec::new()),
+    };
+
+    // "C:" のようなドライブレターのみのパスは Windows ではカレントドライブの
+    // 作業ディレクトリ相対パスとして解釈され、ドライブ直下ではなくCWDが返ってしまう。
+    // ドライブルートを明示するため "\\" を付与して正規化する
+    let normalized = if path.len() == 2 && path.ends_with(':') {
+        format!("{}\\", path)
+    } else {
+        path.clone()
+    };
+
+    let dir = std::path::Path::new(&normalized);
+    let mut entries: Vec<DirEntryResult> = std::fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| {
+            let entry_path = entry.path();
+            let is_dir = entry_path.is_dir();
+            let ext = if is_dir {
+                String::new()
+            } else {
+                entry_path
+                    .extension()
+                    .map(|e| e.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            };
+            let score = scoring::score_path(&entry_path, &keywords, &extensions);
+            DirEntryResult {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                path: entry_path.to_string_lossy().into_owned(),
+                folder: normalized.clone(),
+                is_dir,
+                ext,
+                score,
+            }
+        })
+        .collect();
+
+    // フォルダを先頭、その後はファイル名（大小無視）の昇順
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(entries)
 }
 
 // ── Phase 4: ファイルプレビュー ──────────────────────────────
@@ -34,6 +116,7 @@ pub struct SemanticResult {
     pub path: String,
     pub name: String,
     pub ext: String,
+    pub is_dir: bool,
     pub score: f32,
 }
 
@@ -89,7 +172,7 @@ impl ExploreCallback for TauriCallback {
 ///
 /// `explore_channel` に指定したイベント名で A* 探索ログをリアルタイム送信する。
 /// 省略すると探索ログは送信されない（静粛モード）。
-#[tauri::command]
+#[tauri::command(async)]
 fn semantic_search(
     app: AppHandle,
     query: String,
@@ -98,7 +181,11 @@ fn semantic_search(
     mu: Option<f32>,
     explore_channel: Option<String>,
     root_path: Option<String>,
+    options: Option<MatchOptions>,
 ) -> Result<Vec<SemanticResult>, String> {
+    // 新しい検索エポックを開始（進行中の旧 browse/search をキャンセルする）
+    let gen = search::next_generation();
+
     let parsed = parse_query(&query);
     let everything_query = parsed.to_everything_query();
     let everything_query = match root_path.filter(|r| !r.is_empty()) {
@@ -107,9 +194,10 @@ fn semantic_search(
         None => everything_query,
     };
 
-    // Everything 絞り込み（非 Windows は空リストを返すスタブ）
-    let paths = fetch_candidates(&everything_query, 1000).map_err(|e| e.to_string())?;
-    if paths.is_empty() {
+    // Everything 絞り込み（非 Windows は空リストを返すスタブ）。
+    // is_dir を保持するため PathBuf ではなくレコードのまま受け取る。
+    let records = fetch_candidates(&everything_query, 1000, options.unwrap_or_default(), gen).map_err(|e| e.to_string())?;
+    if records.is_empty() {
         return Ok(vec![]);
     }
 
@@ -119,17 +207,21 @@ fn semantic_search(
         mu: mu.unwrap_or(0.001),
     };
 
-    // ヒューリスティック: フォルダ名のキーワード一致スコア（埋め込みは Phase 4 で置換予定）
+    // 段階的スコアラー（埋め込みは Phase 4 で置換予定）。
+    // フォルダ(ヒューリスティック)・ファイル(スコアリング)とも同じ scoring::score_path を使い、
+    // 左ペインのスコアと中央ペインのヒート色を一致させる。
     let keywords: Vec<String> = parsed.keywords.iter().map(|s| s.to_lowercase()).collect();
-    let heuristic = move |path: &std::path::Path| -> f32 {
-        keyword_heuristic(path, &keywords)
-    };
-
-    // スコアリング: ファイル名のキーワード一致スコア
-    let keywords2: Vec<String> = parsed.keywords.iter().map(|s| s.to_lowercase()).collect();
     let extensions = parsed.extensions.clone();
+
+    let kw_h = keywords.clone();
+    let ext_h = extensions.clone();
+    let heuristic = move |path: &std::path::Path| -> f32 {
+        scoring::score_path(path, &kw_h, &ext_h)
+    };
+    let kw_s = keywords.clone();
+    let ext_s = extensions.clone();
     let scorer = move |path: &std::path::Path| -> f32 {
-        keyword_scorer(path, &keywords2, &extensions)
+        scoring::score_path(path, &kw_s, &ext_s)
     };
 
     let mut cb: Box<dyn ExploreCallback> = if let Some(ch) = explore_channel {
@@ -138,89 +230,43 @@ fn semantic_search(
         Box::new(astar::NoopCallback)
     };
 
-    let results = run_with_paths(&config, &paths, heuristic, scorer, cb.as_mut());
+    // A* 探索は中央ペイン用の探索ログ(callback)を流すために実行する。
+    // 戻り値（左ペイン）は A* 出力ではなく Everything 全候補のスコア付き一覧を使う
+    // （A* はファイル到達ノードのみ結果に積むためフォルダや一部ファイルが欠落するため）。
+    let paths: Vec<std::path::PathBuf> =
+        records.iter().map(|r| std::path::PathBuf::from(&r.path)).collect();
+    let _ = run_with_paths(&config, &paths, heuristic, scorer, cb.as_mut());
 
-    Ok(results
+    // 左ペイン: 全候補をスコア付けし降順ソートして返す
+    let mut results: Vec<SemanticResult> = records
         .into_iter()
         .map(|r| {
-            let path_str = r.path.to_string_lossy().into_owned();
-            let name = r
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let ext = r
-                .path
-                .extension()
-                .map(|e| e.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            SemanticResult { path: path_str, name, ext, score: r.score }
+            let score = scoring::score_path(std::path::Path::new(&r.path), &keywords, &extensions);
+            SemanticResult {
+                path: r.path,
+                name: r.name,
+                ext: r.ext,
+                is_dir: r.is_dir,
+                score,
+            }
         })
-        .collect())
-}
+        .collect();
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
-// ── ヒューリスティック / スコアリング（キーワードベース暫定実装） ──
-//
-// Phase 4 でフォルダ embedding（mmap 常駐）に置換する。
-// 現時点ではキーワード出現割合で近似する。
-
-fn keyword_heuristic(path: &std::path::Path, keywords: &[String]) -> f32 {
-    if keywords.is_empty() {
-        return 0.5;
-    }
-    let dir_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    let matched = keywords.iter().filter(|kw| dir_name.contains(kw.as_str())).count();
-    0.1 + 0.9 * (matched as f32 / keywords.len() as f32)
-}
-
-fn keyword_scorer(
-    path: &std::path::Path,
-    keywords: &[String],
-    extensions: &[String],
-) -> f32 {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-
-    // 拡張子ボーナス
-    let ext_bonus = if !extensions.is_empty() {
-        let file_ext = path
-            .extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        if extensions.iter().any(|e| e.as_str() == file_ext.as_str()) { 0.2 } else { 0.0 }
-    } else {
-        0.0
-    };
-
-    if keywords.is_empty() {
-        return 0.5 + ext_bonus;
-    }
-    let matched = keywords.iter().filter(|kw| name.contains(kw.as_str())).count();
-    let kw_score = matched as f32 / keywords.len() as f32;
-    (0.1 + 0.7 * kw_score + ext_bonus).min(1.0)
+    Ok(results)
 }
 
 // ── Everything 呼び出し（Windows only / 非 Windows はスタブ） ──
+//
+// is_dir を保持するため Everything のレコード（EvResult）をそのまま返す。
 
 #[cfg(windows)]
-fn fetch_candidates(
-    query: &str,
-    max: u32,
-) -> Result<Vec<std::path::PathBuf>, SearchError> {
-    let results = search::search(query, max)?;
-    Ok(results.into_iter().map(|r| std::path::PathBuf::from(r.path)).collect())
+fn fetch_candidates(query: &str, max: u32, options: MatchOptions, gen: u64) -> Result<Vec<EvResult>, SearchError> {
+    search::search(query, max, options, gen)
 }
 
 #[cfg(not(windows))]
-fn fetch_candidates(
-    _query: &str,
-    _max: u32,
-) -> Result<Vec<std::path::PathBuf>, std::io::Error> {
+fn fetch_candidates(_query: &str, _max: u32, _options: MatchOptions, _gen: u64) -> Result<Vec<EvResult>, SearchError> {
     Ok(vec![])
 }
 
@@ -230,16 +276,21 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let state = FolderIndexState::init(app.handle()).map_err(std::io::Error::other)?;
             app.manage(state);
+            app.manage(BrowseState(Mutex::new((0, Vec::new()))));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             search_files,
             semantic_search,
             get_preview,
-            index_folders_command
+            index_folders_command,
+            list_directory,
+            browse,
+            fetch_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

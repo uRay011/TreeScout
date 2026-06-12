@@ -1,28 +1,23 @@
 /**
- * ヒートマップ色設計：スコア→輝度マッピング
+ * ヒートマップ色設計：スコア→輝度マッピング（mock_v2.html J2 setHeat() 準拠）
  *
  * 設計仕様（design.md §3.5）:
  *   background: hsl(220, 80%, calc(20% + score * 60%))
  *   score=0.97 → hsl(220,80%,78%) 明るいブルー
  *   score=0.30 → hsl(220,80%,38%) 暗いブルー
- *   score=0.00 → 無色（背景デフォルト）
+ *   score=0.00 → hsl(220,80%,20%)（opacity=0でほぼ無色）
+ *
+ * --heat-opacity はスコアに比例（skipped は score*0.5 に減衰）。
+ * 実際の不透明度は利用側で --heat-alpha-max 等を掛けて決める。
  *
  * スコア帯ティア:
- *   NONE  : score < 0.30  → 無色（背景デフォルト）
+ *   NONE  : score < 0.30  → ░░░░ ほぼ無色
  *   LOW   : 0.30 ≤ score < 0.60  → ░░░░ 薄いブルー
  *   MID   : 0.60 ≤ score < 0.90  → ▓▓▓▓ 中間ブルー
  *   HIGH  : 0.90 ≤ score          → ████ 明るいブルー
  */
 
 export type HeatTier = "none" | "low" | "mid" | "high";
-
-/** スコア値（0.0〜1.0）から CSS HSL 色文字列を返す。score < 0.3 は null（無色）。 */
-export function scoreToColor(score: number): string | null {
-  if (score < 0.3) return null;
-  // 輝度: 20% + score * 60%  →  範囲 [38%, 78%]
-  const lightness = 20 + score * 60;
-  return `hsl(220, 80%, ${lightness.toFixed(1)}%)`;
-}
 
 /** スコアのティアを返す。アイコン・aria ラベル・クラス名に使用する。 */
 export function scoreTier(score: number): HeatTier {
@@ -41,25 +36,21 @@ export const TIER_LABELS: Record<HeatTier, string> = {
 };
 
 /**
- * スコアをバックグラウンド輝度に変換し、可読テキスト色を返す。
- * ダークテーマ前提で輝度 < 50% なら明色テキスト、>= 50% なら暗色テキストを選択する。
+ * スコアをバックグラウンド輝度に変換し、可読テキスト色を返す（mock_v2.html heatText() 準拠）。
+ * 背景輝度56%（score=0.6）以上は --bg、未満は --text を文字色として使う。
  */
 export function scoreToTextColor(score: number): string {
-  const lightness = 20 + score * 60;
-  return lightness >= 55 ? "hsl(220, 15%, 12%)" : "hsl(220, 20%, 90%)";
+  return score >= 0.6 ? "#0d1117" : "#e6edf3";
 }
 
 /** CSS変数として注入するインラインスタイルオブジェクトを生成する。
  *  GPU合成を維持するため `opacity` のみを変数で制御し、背景色は別途 CSS で hsl() を使う。 */
-export function heatmapStyle(score: number): React.CSSProperties {
-  const color = scoreToColor(score);
-  if (!color) {
-    return { "--heat-bg": "transparent", "--heat-opacity": "0" } as React.CSSProperties;
-  }
+export function heatmapStyle(score: number, kind: "found" | "skipped" | "opened" = "opened"): React.CSSProperties {
   const lightness = 20 + score * 60;
+  const opacity = kind === "skipped" ? score * 0.5 : score;
   return {
     "--heat-bg":      `hsl(220, 80%, ${lightness.toFixed(1)}%)`,
-    "--heat-opacity": "1",
+    "--heat-opacity": opacity.toFixed(3),
     "--heat-text":    scoreToTextColor(score),
   } as React.CSSProperties;
 }
