@@ -15,9 +15,10 @@ mod folder_index;
 use folder_index::{index_folders_command, FolderIndexState};
 
 // ── Phase 1 既存コマンド（後方互換） ────────────────────────
-#[tauri::command]
+#[tauri::command(async)]
 fn search_files(query: String, max: Option<u32>, options: Option<MatchOptions>) -> Result<Vec<EvResult>, String> {
-    search::search(&query, max.unwrap_or(200), options.unwrap_or_default()).map_err(|e| e.to_string())
+    let gen = search::next_generation();
+    search::search(&query, max.unwrap_or(200), options.unwrap_or_default(), gen).map_err(|e| e.to_string())
 }
 
 // ── Phase 4: カラムUIのフォルダ展開 ──────────────────────────
@@ -36,7 +37,7 @@ struct DirEntryResult {
     score: f32,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_directory(path: String, query: Option<String>) -> Result<Vec<DirEntryResult>, String> {
     // query 指定時のみキーワードを抽出してスコアリングする（未指定＝無着色）
     let (keywords, extensions): (Vec<String>, Vec<String>) = match query.filter(|q| !q.trim().is_empty()) {
@@ -50,7 +51,16 @@ fn list_directory(path: String, query: Option<String>) -> Result<Vec<DirEntryRes
         None => (Vec::new(), Vec::new()),
     };
 
-    let dir = std::path::Path::new(&path);
+    // "C:" のようなドライブレターのみのパスは Windows ではカレントドライブの
+    // 作業ディレクトリ相対パスとして解釈され、ドライブ直下ではなくCWDが返ってしまう。
+    // ドライブルートを明示するため "\\" を付与して正規化する
+    let normalized = if path.len() == 2 && path.ends_with(':') {
+        format!("{}\\", path)
+    } else {
+        path.clone()
+    };
+
+    let dir = std::path::Path::new(&normalized);
     let mut entries: Vec<DirEntryResult> = std::fs::read_dir(dir)
         .map_err(|e| e.to_string())?
         .filter_map(|entry| entry.ok())
@@ -69,7 +79,7 @@ fn list_directory(path: String, query: Option<String>) -> Result<Vec<DirEntryRes
             DirEntryResult {
                 name: entry.file_name().to_string_lossy().into_owned(),
                 path: entry_path.to_string_lossy().into_owned(),
-                folder: path.clone(),
+                folder: normalized.clone(),
                 is_dir,
                 ext,
                 score,
@@ -162,7 +172,7 @@ impl ExploreCallback for TauriCallback {
 ///
 /// `explore_channel` に指定したイベント名で A* 探索ログをリアルタイム送信する。
 /// 省略すると探索ログは送信されない（静粛モード）。
-#[tauri::command]
+#[tauri::command(async)]
 fn semantic_search(
     app: AppHandle,
     query: String,
@@ -173,6 +183,9 @@ fn semantic_search(
     root_path: Option<String>,
     options: Option<MatchOptions>,
 ) -> Result<Vec<SemanticResult>, String> {
+    // 新しい検索エポックを開始（進行中の旧 browse/search をキャンセルする）
+    let gen = search::next_generation();
+
     let parsed = parse_query(&query);
     let everything_query = parsed.to_everything_query();
     let everything_query = match root_path.filter(|r| !r.is_empty()) {
@@ -183,7 +196,7 @@ fn semantic_search(
 
     // Everything 絞り込み（非 Windows は空リストを返すスタブ）。
     // is_dir を保持するため PathBuf ではなくレコードのまま受け取る。
-    let records = fetch_candidates(&everything_query, 1000, options.unwrap_or_default()).map_err(|e| e.to_string())?;
+    let records = fetch_candidates(&everything_query, 1000, options.unwrap_or_default(), gen).map_err(|e| e.to_string())?;
     if records.is_empty() {
         return Ok(vec![]);
     }
@@ -248,12 +261,12 @@ fn semantic_search(
 // is_dir を保持するため Everything のレコード（EvResult）をそのまま返す。
 
 #[cfg(windows)]
-fn fetch_candidates(query: &str, max: u32, options: MatchOptions) -> Result<Vec<EvResult>, SearchError> {
-    search::search(query, max, options)
+fn fetch_candidates(query: &str, max: u32, options: MatchOptions, gen: u64) -> Result<Vec<EvResult>, SearchError> {
+    search::search(query, max, options, gen)
 }
 
 #[cfg(not(windows))]
-fn fetch_candidates(_query: &str, _max: u32, _options: MatchOptions) -> Result<Vec<EvResult>, SearchError> {
+fn fetch_candidates(_query: &str, _max: u32, _options: MatchOptions, _gen: u64) -> Result<Vec<EvResult>, SearchError> {
     Ok(vec![])
 }
 
@@ -267,7 +280,7 @@ pub fn run() {
         .setup(|app| {
             let state = FolderIndexState::init(app.handle()).map_err(std::io::Error::other)?;
             app.manage(state);
-            app.manage(BrowseState(Mutex::new(Vec::new())));
+            app.manage(BrowseState(Mutex::new((0, Vec::new()))));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

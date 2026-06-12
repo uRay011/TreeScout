@@ -172,8 +172,7 @@ export default function App() {
   const [viewMenuAnchor, setViewMenuAnchor] = useState<HTMLElement | null>(null);
 
   // ファイル/編集/検索メニューの開閉（共通ドロップダウン）
-  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
-  const [menuPopupAnchor, setMenuPopupAnchor] = useState<HTMLElement | null>(null);
+  const [menuPopup, setMenuPopup] = useState<{ key: string; anchor: HTMLElement } | null>(null);
 
   // 検索メニューのマッチオプション（大文字小文字の区別/単語に完全一致/フォルダ名にマッチ）
   const [searchOptions, setSearchOptions] = useState<Required<MatchOptions>>(loadSearchOptions);
@@ -257,7 +256,11 @@ export default function App() {
       setResults([]);
       setPhase("Everything 検索中…");
       try {
-        const total = await browseWin.runBrowse(everythingQuery, browseSort, searchOptions);
+        // 全件抽出中は件数をライブ表示（全ドライブ等で数十秒かかる間も状況が分かる）
+        const total = await browseWin.runBrowse(everythingQuery, browseSort, searchOptions, (p) => {
+          if (seq !== searchSeqRef.current) return;
+          setPhase(`Everything 取得中… ${p.count.toLocaleString()}件`);
+        });
         if (seq !== searchSeqRef.current) return;
         stopElapsedTimer(performance.now() - t0);
         setPhase(`完了 — ${total}件 / ${Math.round(performance.now() - t0)}ms`);
@@ -393,11 +396,24 @@ export default function App() {
     setRootPath("");
   }, []);
 
-  // 初回表示、ルートフォルダの確定・解除（全体に戻す）、検索オプション切替時に即座に一覧を取得する
+  // 初回表示、ルートフォルダの確定・解除（全体に戻す）時は即座に一覧を取得する。
+  // StrictModeの開発時二重マウントで同一rootPathのhandleSearchが二重起動し、
+  // 全ドライブbrowseが2本同時に走る（＝ステータス表示の乱れ・20秒browseの二度手間）のを防ぐ
+  const lastSearchedRootRef = useRef<string | null>(null);
   useEffect(() => {
+    if (lastSearchedRootRef.current === rootPath) return;
+    lastSearchedRootRef.current = rootPath;
     handleSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootPath, searchMode, searchOptions]);
+  }, [rootPath]);
+
+  // 検索モード・検索オプション切替時の再取得。
+  // 検索ボックスが空の場合、これらの設定は結果に影響しない（空クエリ分岐で決まる）ため実行しない
+  useEffect(() => {
+    if (!query.trim()) return;
+    handleSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchMode, searchOptions]);
 
   // カラムUI: エントリ選択 → アクティブ化 + プレビュー更新
   // フォルダ選択時は直下の中身を取得し、次のカラムとして展開する（それ以降の既存カラムは破棄）
@@ -495,19 +511,10 @@ export default function App() {
 
   // 「ファイル」「編集」「検索」メニューボタン共通（タイトルバー / ハンバーガードロップダウン共通）
   const onMenuPopupClick = useCallback((key: string, e: React.MouseEvent<HTMLButtonElement>) => {
-    setOpenMenuKey(prev => {
-      if (prev === key) {
-        setMenuPopupAnchor(null);
-        return null;
-      }
-      setMenuPopupAnchor(e.currentTarget);
-      return key;
-    });
+    const anchor = e.currentTarget;
+    setMenuPopup(prev => (prev?.key === key ? null : { key, anchor }));
   }, []);
-  const closeMenuPopup = useCallback(() => {
-    setOpenMenuKey(null);
-    setMenuPopupAnchor(null);
-  }, []);
+  const closeMenuPopup = useCallback(() => setMenuPopup(null), []);
 
   // 検索メニューのトグル（大文字小文字の区別/単語に完全一致/フォルダ名にマッチ）。永続化する
   const toggleSearchOption = useCallback((key: keyof MatchOptions) => {
@@ -762,7 +769,7 @@ export default function App() {
                 className="menu-btn"
                 type="button"
                 aria-haspopup="true"
-                aria-expanded={openMenuKey === item}
+                aria-expanded={menuPopup?.key === item}
                 onClick={(e) => onMenuPopupClick(item, e)}
               >
                 {item}
@@ -808,7 +815,7 @@ export default function App() {
                   role="menuitem"
                   type="button"
                   aria-haspopup="true"
-                  aria-expanded={openMenuKey === item}
+                  aria-expanded={menuPopup?.key === item}
                   onClick={(e) => onMenuPopupClick(item, e)}
                 >
                   {item}
@@ -829,12 +836,12 @@ export default function App() {
           />
         )}
 
-        {menuPopupAnchor && openMenuKey && menuPopupItems[openMenuKey] && (
+        {menuPopup && menuPopupItems[menuPopup.key] && (
           <MenuBarPopup
-            anchorEl={menuPopupAnchor}
-            items={menuPopupItems[openMenuKey]}
+            anchorEl={menuPopup.anchor}
+            items={menuPopupItems[menuPopup.key]}
             onClose={closeMenuPopup}
-            ariaLabel={`${openMenuKey}メニュー`}
+            ariaLabel={`${menuPopup.key}メニュー`}
           />
         )}
 

@@ -38,14 +38,53 @@ export interface BrowseSort {
   asc: boolean;
 }
 
-/** Everything で query を実行し、sort 済み全件をバックエンドに常駐させて総件数を返す。 */
-export async function browse(query: string, sort: BrowseSort, options?: MatchOptions): Promise<number> {
-  return invoke<number>("browse", { query, sort, options });
+/** 全件抽出中の進捗（バックエンドの BrowseProgress に対応）。 */
+export interface BrowseProgress {
+  count: number;
+  elapsed_ms: number;
 }
 
-/** 常駐スナップショットの [offset, offset+limit) を SearchResult 形で取得する。 */
-export async function fetchWindow(offset: number, limit: number): Promise<SearchResult[]> {
-  return invoke<SearchResult[]>("fetch_window", { offset, limit });
+/**
+ * browse の結果。総件数と、そのスナップショットを常駐させた検索世代。
+ * 並行 browse 時、フロントは generation が最大のものだけを採用し、
+ * fetchWindow にも同じ generation を渡して世代の食い違いを防ぐ。
+ */
+export interface BrowseResult {
+  total: number;
+  generation: number;
+}
+
+/**
+ * Everything で query を実行し、sort 済み全件をバックエンドに常駐させて
+ * 総件数と確定世代を返す。
+ *
+ * `onProgress` を渡すと、抽出中の件数・経過msを ~100ms 間隔で受け取れる
+ * （全ドライブ等の大量件数時に進捗表示するため）。
+ */
+export async function browse(
+  query: string,
+  sort: BrowseSort,
+  options?: MatchOptions,
+  onProgress?: (p: BrowseProgress) => void,
+): Promise<BrowseResult> {
+  let unlisten: UnlistenFn | undefined;
+  const channel = onProgress ? `treescout://browse-progress/${Date.now()}` : undefined;
+  if (channel && onProgress) {
+    unlisten = await listen<BrowseProgress>(channel, (ev) => onProgress(ev.payload));
+  }
+  try {
+    return await invoke<BrowseResult>("browse", { query, sort, options, progressChannel: channel ?? null });
+  } finally {
+    unlisten?.();
+  }
+}
+
+/**
+ * 常駐スナップショットの [offset, offset+limit) を SearchResult 形で取得する。
+ * `generation` は browse が返した世代。スナップショットが別世代に差し替わっていれば空配列。
+ */
+export async function fetchWindow(offset: number, limit: number, generation: number): Promise<SearchResult[]> {
+  return invoke<SearchResult[]>("fetch_window", { offset, limit, generation });
 }
 
 // Phase 4: カラムUIのフォルダ展開
@@ -154,7 +193,9 @@ export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string
     while (columns.length <= idx) {
       columns.push({ id: `col-${columns.length}`, label: "", entries: [], activeEntryPath: null });
     }
-    if (!columns[idx].label) columns[idx].label = label;
+    // rootPath未指定時のcol-0はドライブ一覧（C:, D:...が並ぶ）なので、
+    // 最初に見つかったドライブ名をラベルにしてしまうと他のドライブと矛盾する
+    if (!columns[idx].label) columns[idx].label = idx === 0 && !rootPath ? "PC" : label;
     return columns[idx];
   };
 

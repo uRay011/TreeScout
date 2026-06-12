@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use windows::core::PCWSTR;
@@ -15,6 +16,31 @@ use windows::Win32::System::Time::FileTimeToSystemTime;
 /// 競合するため、DLL操作を行う区間全体をこのロックで直列化する。
 static QUERY_LOCK: Mutex<()> = Mutex::new(());
 
+/// 検索の「世代」。新しい検索を開始する側が `next_generation()` で進める。
+/// 進行中の検索は自分の世代と一致しなくなったら早期 return してロックを解放する
+/// （重い全件抽出ループの途中でキャンセルし、後続クエリを待たせないため）。
+static SEARCH_GEN: AtomicU64 = AtomicU64::new(0);
+
+/// 新しい検索エポックを開始し、その世代番号を返す。
+///
+/// これを呼んだ時点で、これより古い世代で進行中の `search()`/`browse()` は
+/// 次のチェックポイントで `SearchError::Cancelled` を返して打ち切られる。
+pub fn next_generation() -> u64 {
+    SEARCH_GEN.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// 現在の検索世代を返す。`browse` 結果を常駐させる際、その時点で自分が最新かを
+/// 確認し、スナップショットと総件数を同一世代で対応付けるために使う。
+pub fn current_generation() -> u64 {
+    SEARCH_GEN.load(Ordering::Acquire)
+}
+
+/// `gen` がまだ最新の検索世代か（false なら新しい検索に置き換えられている）。
+#[inline]
+fn is_current(gen: u64) -> bool {
+    SEARCH_GEN.load(Ordering::Acquire) == gen
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SearchError {
     #[error("Everything64.dll のロードに失敗: {0}")]
@@ -23,6 +49,8 @@ pub enum SearchError {
     NotRunning,
     #[error("クエリ失敗: code={0}")]
     QueryFailed(u32),
+    #[error("検索がキャンセルされました")]
+    Cancelled,
 }
 
 /// Everything のマッチングオプション（検索メニューのトグルに対応）
@@ -160,7 +188,10 @@ unsafe fn pcwstr_to_string(p: PCWSTR) -> String {
 }
 
 /// Everything でファイル検索する。max 件まで返す。
-pub fn search(query: &str, max: u32, opts: MatchOptions) -> Result<Vec<SearchResult>, SearchError> {
+///
+/// `gen` には `next_generation()` で取得した世代番号を渡す。抽出途中で新しい検索が
+/// 始まると `SearchError::Cancelled` を返し、`QUERY_LOCK` を速やかに解放する。
+pub fn search(query: &str, max: u32, opts: MatchOptions, gen: u64) -> Result<Vec<SearchResult>, SearchError> {
     let api_result = API.get_or_init(|| unsafe { load_api() });
     let api = match api_result {
         Ok(a) => a,
@@ -170,6 +201,10 @@ pub fn search(query: &str, max: u32, opts: MatchOptions) -> Result<Vec<SearchRes
     let query_w = query_to_wide(query);
 
     let _guard = QUERY_LOCK.lock().unwrap();
+    // ロック待ちの間に後続検索へ置き換えられていたら、QueryW を撃たずに即降りる
+    if !is_current(gen) {
+        return Err(SearchError::Cancelled);
+    }
     unsafe {
         (api.set_request_flags)(EVERYTHING_REQUEST_FILE_NAME | EVERYTHING_REQUEST_PATH);
         (api.set_max)(max);
@@ -191,6 +226,10 @@ pub fn search(query: &str, max: u32, opts: MatchOptions) -> Result<Vec<SearchRes
         let mut results = Vec::with_capacity(count as usize);
 
         for i in 0..count {
+            // 抽出ループ途中の世代チェック（数千件ごと）。新検索が来たら打ち切る
+            if i % 4096 == 0 && !is_current(gen) {
+                return Err(SearchError::Cancelled);
+            }
             let name = pcwstr_to_string((api.get_result_file_name_w)(i));
             let dir = pcwstr_to_string((api.get_result_path_w)(i));
             let is_file = (api.is_file_result)(i) != 0;
@@ -273,7 +312,19 @@ fn sort_browse_rows(rows: &mut [BrowseRow], sort: u32) {
 ///
 /// `sort` には `EVERYTHING_SORT_*` 定数を指定する。`max` 件まで取得し、
 /// 結果は `BrowseRow` としてフルパス・サイズ・更新日時のみ保持する。
-pub fn browse(query: &str, sort: u32, max: u32, opts: MatchOptions) -> Result<Vec<BrowseRow>, SearchError> {
+///
+/// `gen` には `next_generation()` の世代番号を渡す。全件抽出は数十万〜百万件規模で
+/// 重いため、途中で新しい検索が始まると `SearchError::Cancelled` を返して打ち切り、
+/// `QUERY_LOCK` を速やかに解放する。`on_progress` は抽出済み件数を進捗表示用に通知する
+/// （呼び出し側で時間スロットルする想定）。
+pub fn browse<F: FnMut(usize)>(
+    query: &str,
+    sort: u32,
+    max: u32,
+    opts: MatchOptions,
+    gen: u64,
+    mut on_progress: F,
+) -> Result<Vec<BrowseRow>, SearchError> {
     let api_result = API.get_or_init(|| unsafe { load_api() });
     let api = match api_result {
         Ok(a) => a,
@@ -283,6 +334,10 @@ pub fn browse(query: &str, sort: u32, max: u32, opts: MatchOptions) -> Result<Ve
     let query_w = query_to_wide(query);
 
     let _guard = QUERY_LOCK.lock().unwrap();
+    // ロック待ちの間に後続検索へ置き換えられていたら、QueryW を撃たずに即降りる
+    if !is_current(gen) {
+        return Err(SearchError::Cancelled);
+    }
     unsafe {
         (api.set_request_flags)(
             EVERYTHING_REQUEST_FILE_NAME
@@ -309,6 +364,13 @@ pub fn browse(query: &str, sort: u32, max: u32, opts: MatchOptions) -> Result<Ve
         let mut results = Vec::with_capacity(count as usize);
 
         for i in 0..count {
+            // 抽出ループ途中の世代チェック＋進捗通知（数千件ごと）
+            if i % 4096 == 0 {
+                if !is_current(gen) {
+                    return Err(SearchError::Cancelled);
+                }
+                on_progress(i as usize);
+            }
             let name = pcwstr_to_string((api.get_result_file_name_w)(i));
             let dir = pcwstr_to_string((api.get_result_path_w)(i));
             let is_file = (api.is_file_result)(i) != 0;
@@ -332,6 +394,10 @@ pub fn browse(query: &str, sort: u32, max: u32, opts: MatchOptions) -> Result<Ve
             });
         }
 
+        // ソート（O(N log N)）も重いので、その前に最終キャンセルチェック
+        if !is_current(gen) {
+            return Err(SearchError::Cancelled);
+        }
         sort_browse_rows(&mut results, sort);
         Ok(results)
     }

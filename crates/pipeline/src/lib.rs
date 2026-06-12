@@ -124,7 +124,9 @@ where
     fn fetch_candidates(&self, query: &str) -> Result<Vec<PathBuf>, PipelineError> {
         use search::search as ev_search;
 
-        let results = ev_search(query, self.config.everything_max, search::MatchOptions::default())
+        // 独立した検索エポックで実行する（キャンセル機構は呼び出し元では未使用）
+        let gen = search::next_generation();
+        let results = ev_search(query, self.config.everything_max, search::MatchOptions::default(), gen)
             .map_err(PipelineError::Everything)?;
         Ok(results.into_iter().map(|r| PathBuf::from(r.path)).collect())
     }

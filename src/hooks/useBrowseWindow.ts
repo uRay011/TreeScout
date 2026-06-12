@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { browse, fetchWindow, BrowseSort, MatchOptions, SearchResult } from "../lib/tauri";
+import { browse, fetchWindow, BrowseSort, BrowseProgress, MatchOptions, SearchResult } from "../lib/tauri";
 
 // 可視範囲先読み取得のデバウンス間隔（ms）。連続スクロール中の過剰fetchWindow呼び出しを抑える
 const ENSURE_DEBOUNCE_MS = 24;
@@ -14,7 +14,7 @@ export interface BrowseWindow {
   /** [lo, hi] の範囲を非同期で取得・キャッシュする（デバウンス済み） */
   ensureRange: (lo: number, hi: number) => void;
   /** クエリ・ソートでバックエンドに全件を常駐させ、総件数を取得して返す */
-  runBrowse: (query: string, sort: BrowseSort, options?: MatchOptions) => Promise<number>;
+  runBrowse: (query: string, sort: BrowseSort, options?: MatchOptions, onProgress?: (p: BrowseProgress) => void) => Promise<number>;
 }
 
 /**
@@ -30,7 +30,12 @@ export function useBrowseWindow(): BrowseWindow {
 
   const cacheRef = useRef<Map<number, SearchResult>>(new Map());
   const totalRef = useRef(0);
+  // 表示中のバックエンド検索世代（browse が返す generation）。fetchWindow にも渡し、
+  // 常駐スナップショットの世代と照合する。並行 browse での総件数⇔スナップショットの
+  // 世代ズレ（途中までしか出ない不整合）を防ぐ要。
   const genRef = useRef(0);
+  // runBrowse のローカル呼び出し番号（進捗コールバックの新旧判定用）
+  const reqRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // ensureRangeのデバウンス中に保持する最新範囲（最新範囲のみ処理すれば十分）
   const pendingRangeRef = useRef<{ lo: number; hi: number } | null>(null);
@@ -66,7 +71,7 @@ export function useBrowseWindow(): BrowseWindow {
     const limit = maxMissing - minMissing + 1;
     fetchingRef.current = true;
 
-    fetchWindow(offset, limit)
+    fetchWindow(offset, limit, gen)
       .then((rows) => {
         if (gen !== genRef.current) return; // stale
         rows.forEach((row, idx) => {
@@ -107,8 +112,8 @@ export function useBrowseWindow(): BrowseWindow {
     }, ENSURE_DEBOUNCE_MS);
   }, [flushEnsure]);
 
-  const runBrowse = useCallback(async (query: string, sort: BrowseSort, options?: MatchOptions): Promise<number> => {
-    const gen = ++genRef.current;
+  const runBrowse = useCallback(async (query: string, sort: BrowseSort, options?: MatchOptions, onProgress?: (p: BrowseProgress) => void): Promise<number> => {
+    const req = ++reqRef.current;
 
     // 進行中のデバウンス・キャッシュをリセット
     if (debounceRef.current) {
@@ -117,11 +122,12 @@ export function useBrowseWindow(): BrowseWindow {
     }
     pendingRangeRef.current = null;
 
-    let t: number;
+    let res;
     try {
-      t = await browse(query, sort, options);
+      // 旧 runBrowse の遅延進捗で表示が乱れないよう、最新呼び出しの進捗のみ通す
+      res = await browse(query, sort, options, onProgress ? (p) => { if (req === reqRef.current) onProgress(p); } : undefined);
     } catch {
-      if (gen === genRef.current) {
+      if (req === reqRef.current) {
         cacheRef.current.clear();
         totalRef.current = 0;
         setTotal(0);
@@ -129,18 +135,23 @@ export function useBrowseWindow(): BrowseWindow {
       }
       return 0;
     }
-    if (gen !== genRef.current) return t; // stale（呼び出し側のseqガードで破棄される）
+
+    const { total: t, generation } = res;
+    // 最大世代のみ採用。並行 browse で総件数とスナップショットの世代がズレるのを防ぐ
+    // （世代は SEARCH_GEN で単調増加するため、後発 browse は必ず大きい generation を持つ）
+    if (generation <= genRef.current) return t;
+    genRef.current = generation;
 
     cacheRef.current.clear();
     totalRef.current = t;
     setTotal(t);
 
-    // 先頭窓を即prefetch
+    // 先頭窓を即prefetch（同一世代のみキャッシュ）
     if (t > 0) {
       const limit = Math.min(INITIAL_PREFETCH, t);
       try {
-        const rows = await fetchWindow(0, limit);
-        if (gen === genRef.current) {
+        const rows = await fetchWindow(0, limit, generation);
+        if (generation === genRef.current) {
           rows.forEach((row, idx) => cacheRef.current.set(idx, row));
         }
       } catch {
@@ -148,7 +159,7 @@ export function useBrowseWindow(): BrowseWindow {
       }
     }
 
-    if (gen === genRef.current) tick();
+    if (generation === genRef.current) tick();
     return t;
   }, [tick]);
 

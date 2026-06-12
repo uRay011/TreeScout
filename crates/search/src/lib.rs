@@ -3,7 +3,7 @@ mod everything;
 
 #[cfg(windows)]
 pub use everything::{
-    browse, format_mtime, search, BrowseRow, MatchOptions, SearchError, SearchResult,
+    browse, current_generation, format_mtime, next_generation, search, BrowseRow, MatchOptions, SearchError, SearchResult,
     EVERYTHING_SORT_DATE_MODIFIED_ASCENDING, EVERYTHING_SORT_DATE_MODIFIED_DESCENDING,
     EVERYTHING_SORT_NAME_ASCENDING, EVERYTHING_SORT_NAME_DESCENDING,
     EVERYTHING_SORT_PATH_ASCENDING, EVERYTHING_SORT_PATH_DESCENDING,
@@ -19,6 +19,8 @@ mod stub {
     pub enum SearchError {
         #[error("Windows 環境が必要です")]
         Unsupported,
+        #[error("検索がキャンセルされました")]
+        Cancelled,
     }
 
     #[derive(Debug, Serialize)]
@@ -48,11 +50,26 @@ mod stub {
         pub match_path: bool,
     }
 
-    pub fn search(_query: &str, _max: u32, _opts: MatchOptions) -> Result<Vec<SearchResult>, SearchError> {
+    pub fn next_generation() -> u64 {
+        0
+    }
+
+    pub fn current_generation() -> u64 {
+        0
+    }
+
+    pub fn search(_query: &str, _max: u32, _opts: MatchOptions, _gen: u64) -> Result<Vec<SearchResult>, SearchError> {
         Ok(vec![])
     }
 
-    pub fn browse(_query: &str, _sort: u32, _max: u32, _opts: MatchOptions) -> Result<Vec<BrowseRow>, SearchError> {
+    pub fn browse<F: FnMut(usize)>(
+        _query: &str,
+        _sort: u32,
+        _max: u32,
+        _opts: MatchOptions,
+        _gen: u64,
+        _on_progress: F,
+    ) -> Result<Vec<BrowseRow>, SearchError> {
         Ok(vec![])
     }
 
@@ -73,7 +90,7 @@ mod stub {
 
 #[cfg(not(windows))]
 pub use stub::{
-    browse, format_mtime, search, BrowseRow, MatchOptions, SearchError, SearchResult,
+    browse, current_generation, format_mtime, next_generation, search, BrowseRow, MatchOptions, SearchError, SearchResult,
     EVERYTHING_SORT_DATE_MODIFIED_ASCENDING, EVERYTHING_SORT_DATE_MODIFIED_DESCENDING,
     EVERYTHING_SORT_NAME_ASCENDING, EVERYTHING_SORT_NAME_DESCENDING,
     EVERYTHING_SORT_PATH_ASCENDING, EVERYTHING_SORT_PATH_DESCENDING,
