@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useLayoutEffect } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -18,6 +18,7 @@ import {
   buildColumnsFromEvents,
   basename,
   listDirectory,
+  listDrives,
   BrowseSort,
   BrowseSortCol,
   MatchOptions,
@@ -257,13 +258,13 @@ export default function App() {
       setPhase("Everything 検索中…");
       try {
         // 全件抽出中は件数をライブ表示（全ドライブ等で数十秒かかる間も状況が分かる）
-        const total = await browseWin.runBrowse(everythingQuery, browseSort, searchOptions, (p) => {
+        const { total, debug } = await browseWin.runBrowse(everythingQuery, browseSort, searchOptions, (p) => {
           if (seq !== searchSeqRef.current) return;
           setPhase(`Everything 取得中… ${p.count.toLocaleString()}件`);
         });
         if (seq !== searchSeqRef.current) return;
         stopElapsedTimer(performance.now() - t0);
-        setPhase(`完了 — ${total}件 / ${Math.round(performance.now() - t0)}ms`);
+        setPhase(`完了 — ${total}件 / ${Math.round(performance.now() - t0)}ms${debug ? ` [${debug}]` : ""}`);
       } catch {
         if (seq !== searchSeqRef.current) return;
         stopElapsedTimer(performance.now() - t0);
@@ -369,6 +370,7 @@ export default function App() {
         size: 0,
         modified: "",
         score: r.score,
+        is_suggestion: r.is_suggestion,
       }));
       setResults(normalized);
       stopElapsedTimer(performance.now() - t0);
@@ -557,6 +559,17 @@ export default function App() {
     const target = e.target as HTMLElement;
     setHintsMode(target.closest(".file-list") ? "list" : "default");
   }, []);
+
+  // windowSourceをメモ化し、毎レンダー新規オブジェクトになることでResultList側の
+  // ensureRange用useEffectが無駄に再実行されるのを防ぐ
+  const windowSource = useMemo(
+    () => leftPaneMode === "window" ? {
+      total: browseWin.total,
+      getRow: browseWin.getRow,
+      ensureRange: browseWin.ensureRange,
+    } : undefined,
+    [leftPaneMode, browseWin.total, browseWin.getRow, browseWin.ensureRange]
+  );
 
   // ── キーボードナビゲーション ──
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -912,11 +925,7 @@ export default function App() {
         <div ref={leftPaneRef} style={{ width: 320 }}>
           <ResultList
             results={results}
-            windowSource={leftPaneMode === "window" ? {
-              total: browseWin.total,
-              getRow: browseWin.getRow,
-              ensureRange: browseWin.ensureRange,
-            } : undefined}
+            windowSource={windowSource}
             sort={leftPaneMode === "window" ? browseSort : undefined}
             onSortChange={handleListSortChange}
             selectedIndex={selectedIndex}

@@ -12,6 +12,8 @@ export interface SearchResult {
   modified: string;
   /** セマンティック検索の一致スコア（0.0〜1.0）。Phase1検索結果では未設定 */
   score?: number;
+  /** Everything候補外からA*が発見したAIサジェストか（true: サジェスト / Phase1結果では未設定） */
+  is_suggestion?: boolean;
 }
 
 // 検索メニューのトグル（大文字小文字の区別 / 単語に完全一致 / フォルダ名にマッチ）。
@@ -52,6 +54,8 @@ export interface BrowseProgress {
 export interface BrowseResult {
   total: number;
   generation: number;
+  /** 【調査用】0件時の診断情報。原因判明後に削除する。 */
+  debug?: string;
 }
 
 /**
@@ -106,6 +110,14 @@ export async function listDirectory(path: string, query?: string): Promise<DirEn
   return invoke<DirEntry[]>("list_directory", { path, query: query || null });
 }
 
+/**
+ * 利用可能な論理ドライブのルートパス一覧を取得する（例: ["C:\\", "D:\\", "E:\\"]）。
+ * 左ペイン「PC」階層に、検索結果が0件のドライブもグレー表示するために使う。
+ */
+export async function listDrives(): Promise<string[]> {
+  return invoke<string[]>("list_drives");
+}
+
 // Phase 4: フォルダembedding事前インデックス
 export interface FolderIndexResult {
   updated: number;
@@ -127,6 +139,7 @@ export interface SemanticResult {
   ext: string;
   is_dir: boolean;
   score: number;
+  is_suggestion: boolean;
 }
 
 export type ExploreEvent =
@@ -169,15 +182,37 @@ function pathDepth(path: string): number {
   return path.replace(/[\\/]+$/, "").split(/[\\/]/).length;
 }
 
+function dirname(path: string): string {
+  return path.replace(/[\\/][^\\/]+[\\/]*$/, "");
+}
+
+/**
+ * カラムのヘッダーラベル（=このカラムが表示しているフォルダの名前）を求める。
+ * ドライブルート（"E:" / "E:\"）は「Eドライブ」と表示する。
+ */
+function formatDirLabel(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const driveMatch = trimmed.match(/^([A-Za-z]):$/);
+  if (driveMatch) return `${driveMatch[1].toUpperCase()}ドライブ`;
+  return basename(path) || path;
+}
+
 /**
  * ExploreEvent の系列から探索型カラムUI用の AstarColumn[] を構築する。
  * パスの深さをカラムインデックスとして割り当て、open_dir/skip_dir はそのフォルダ自身を
  * 親カラムのエントリとして、found_file は最も深いカラムへ確定エントリとして追加する。
  *
+ * 各カラムのヘッダーラベルは「そのカラムに並ぶエントリの親フォルダ名」になる
+ * （= 1つ浅いカラムで open_dir されたフォルダ名）。col-0 はルート未指定時は
+ * 仮想的な「PC」、ルート指定時はルートフォルダ自身。
+ *
  * rootPath 指定時は一番左のカラムをルートフォルダ自身に固定し、
  * ルートより上位階層のフォルダ（祖先ディレクトリ）のイベントは非表示にする。
+ *
+ * `allDrives` を渡すと（rootPath未指定時のみ）col-0に、探索で一度も触れられていない
+ * ドライブも非ヒット（skipped）として追加表示する。
  */
-export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string): AstarColumn[] {
+export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string, allDrives?: string[]): AstarColumn[] {
   const columns: AstarColumn[] = [];
   let baseDepth: number | null = null;
 
@@ -186,17 +221,25 @@ export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string
     columns.push({ id: "col-0", label: basename(rootPath) || rootPath, entries: [], activeEntryPath: null });
   }
 
-  const ensureColumn = (depth: number, label: string): AstarColumn | null => {
-    if (baseDepth === null) baseDepth = depth;
-    const idx = depth - baseDepth;
-    if (idx < 0) return null; // ルートより上位階層は非表示
+  const ensureColumn = (idx: number): AstarColumn => {
     while (columns.length <= idx) {
       columns.push({ id: `col-${columns.length}`, label: "", entries: [], activeEntryPath: null });
     }
-    // rootPath未指定時のcol-0はドライブ一覧（C:, D:...が並ぶ）なので、
-    // 最初に見つかったドライブ名をラベルにしてしまうと他のドライブと矛盾する
-    if (!columns[idx].label) columns[idx].label = idx === 0 && !rootPath ? "PC" : label;
     return columns[idx];
+  };
+
+  // 先勝ちでラベルを確定する（後続の兄弟探索で上書きしない）
+  const setLabelIfEmpty = (idx: number, label: string) => {
+    if (idx < 0) return;
+    const col = ensureColumn(idx);
+    if (!col.label) col.label = label;
+  };
+
+  const ensureBaseDepth = (depth: number) => {
+    if (baseDepth === null) {
+      baseDepth = depth;
+      if (!rootPath) setLabelIfEmpty(0, "PC");
+    }
   };
 
   for (const ev of events) {
@@ -204,8 +247,10 @@ export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string
       case "open_dir":
       case "skip_dir": {
         const depth = pathDepth(ev.path);
-        const col = ensureColumn(depth, basename(ev.path) || ev.path);
-        if (!col) break;
+        ensureBaseDepth(depth);
+        const idx = depth - (baseDepth as number);
+        if (idx < 0) break; // ルートより上位階層は非表示
+        const col = ensureColumn(idx);
         const entry: AstarEntry = {
           path: ev.path,
           name: basename(ev.path),
@@ -218,13 +263,18 @@ export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string
         const existing = col.entries.findIndex(e => e.path === ev.path);
         if (existing >= 0) col.entries[existing] = entry;
         else col.entries.push(entry);
+        // open_dir で開いたフォルダの中身は1つ右のカラムに並ぶ → そのヘッダーラベルになる
+        if (ev.type === "open_dir") setLabelIfEmpty(idx + 1, formatDirLabel(ev.path));
         break;
       }
       case "found_file": {
         const depth = pathDepth(ev.path);
-        const parentLabel = basename(ev.path).replace(/[\\/][^\\/]+$/, "") || "結果";
-        const col = ensureColumn(depth, parentLabel);
-        if (!col) break;
+        ensureBaseDepth(depth);
+        const idx = depth - (baseDepth as number);
+        if (idx < 0) break; // ルートより上位階層は非表示
+        const col = ensureColumn(idx);
+        // 通常は親フォルダの open_dir で既にラベル確定済みだが、保険として親フォルダ名を設定する
+        setLabelIfEmpty(idx, formatDirLabel(dirname(ev.path)) || "結果");
         const entry: AstarEntry = {
           path: ev.path,
           name: basename(ev.path),
@@ -240,6 +290,19 @@ export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string
         break;
       }
     }
+  }
+
+  // rootPath未指定時のみ: col-0（PC階層）に未探索ドライブを非ヒット表示として補完する
+  if (!rootPath && allDrives && allDrives.length > 0) {
+    const col0 = ensureColumn(0);
+    if (!col0.label) col0.label = "PC";
+    const present = new Set(col0.entries.map(e => basename(e.path).toUpperCase()));
+    for (const drive of allDrives) {
+      const name = basename(drive) || drive;
+      if (present.has(name.toUpperCase())) continue;
+      col0.entries.push({ path: drive, name, ext: "", is_dir: true, score: 0, kind: "skipped" });
+    }
+    col0.entries.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   return columns;

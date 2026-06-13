@@ -348,7 +348,7 @@ body {
 .col-h-size,
 .col-h-date  { display: none; justify-content: flex-end; flex-shrink: 0; }
 .left-pane.w-md .col-h-size { display: flex; width: 52px; }
-.left-pane.w-lg .col-h-date { display: flex; width: 80px; white-space: nowrap; }
+.left-pane.w-lg .col-h-date { display: flex; width: 96px; white-space: nowrap; margin-left: 12px; }
 
 /* コンパクト時: 名前列ヘッダーを行 .row-main と、フォルダ列ヘッダーを .row-folder-col と一致させる。
    flex-basis を 0 に統一し、ヘッダー「名前」とデータ行のコンテンツ幅の差で列開始位置がずれるのを防ぐ */
@@ -381,9 +381,10 @@ body {
   flex: 1;
   list-style: none;
 }
-.file-list::-webkit-scrollbar        { width: 6px; }
+.file-list::-webkit-scrollbar        { width: 6px; height: 6px; }
 .file-list::-webkit-scrollbar-track  { background: transparent; }
 .file-list::-webkit-scrollbar-thumb  { background: var(--bg5); border-radius: 3px; }
+.file-list::-webkit-scrollbar-corner { background: var(--bg); }
 
 /* 仮想スクロール: 全行ぶんの高さを確保するコンテナに行を絶対配置する */
 .file-list-virtual { position: relative; width: 100%; }
@@ -544,7 +545,7 @@ kbd {
   text-align: right;
 }
 .left-pane.w-md .row-size { display: block; width: 52px; }
-.left-pane.w-lg .row-date { display: block; width: 80px; white-space: nowrap; }
+.left-pane.w-lg .row-date { display: block; width: 96px; white-space: nowrap; margin-left: 12px; }
 
 /* ── 左ペイン表示モード（コンパクト / 標準 / 詳細） ── */
 
@@ -581,6 +582,20 @@ kbd {
 .ext-rs   { background: rgba(240,113,120,0.15); color: var(--c-rs);    border: 1px solid rgba(240,113,120,0.22); }
 .ext-toml { background: rgba(232,178,80,0.15);  color: var(--c-toml);  border: 1px solid rgba(232,178,80,0.22); }
 .ext-other{ background: rgba(110,118,129,0.15); color: var(--c-other); border: 1px solid rgba(110,118,129,0.22); }
+
+/* AIサジェストバッジ: Everything絞り込み候補外からA*が発見した結果に付与（AIガイドパスラインと同系色） */
+.ai-badge {
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 8px; font-weight: 700; letter-spacing: 0.04em;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(63,185,80,0.15);
+  color: var(--success);
+  border: 1px solid rgba(63,185,80,0.3);
+}
+.left-pane.view-compact .ai-badge { height: 16px; font-size: 7px; padding: 0 3px; }
 
 /* ── ペイン分割リサイザー ─────────────────────── */
 .resizer {
