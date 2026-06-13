@@ -12,12 +12,27 @@ use search::{BrowseRow, MatchOptions};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-/// `browse` で取得したソート済み全件を、確定時の検索世代とともに保持する状態。
+/// `browse` で取得した全行と表示順を、確定時の検索世代とともに保持する状態。
 ///
 /// 非同期コマンド化により browse は並行実行され得る。総件数（フロントへ返す）と
 /// スナップショット（fetch_window が読む）を必ず同一世代で対応付けるため、
 /// 世代番号を添えて一体で差し替える。
-pub struct BrowseState(pub Mutex<(u64, Vec<BrowseRow>)>);
+///
+/// `rows` は Everything 自然順のまま据え置き、表示順は `order`（rows へのインデックス）で
+/// 表現する。`key` が一致する限りソート列だけ変えても FFI 全件再取得を避け、
+/// `order` の再計算（インデックス再ソート）だけで並べ替えられる。
+#[derive(Default)]
+pub struct BrowseSnapshot {
+    pub gen: u64,
+    /// 直近 fetch のクエリ＋オプション。キャッシュ判定に使う。
+    pub key: Option<(String, MatchOptions)>,
+    /// Everything 自然順（== 名前昇順）の全行。
+    pub rows: Vec<BrowseRow>,
+    /// `rows` への表示順インデックス。
+    pub order: Vec<u32>,
+}
+
+pub struct BrowseState(pub Mutex<BrowseSnapshot>);
 
 /// メモリ安全のための取得上限件数。
 const BROWSE_MAX: u32 = 2_000_000;
@@ -47,6 +62,8 @@ pub struct BrowseProgress {
 pub struct BrowseResult {
     pub total: usize,
     pub generation: u64,
+    /// 【調査用】0件時の診断情報。原因判明後に削除する。
+    pub debug: Option<String>,
 }
 
 /// `fetch_window` が返す1行分（フロント表示用に派生済み）。
@@ -96,6 +113,20 @@ pub fn browse(
 ) -> Result<BrowseResult, String> {
     // 新しい検索エポックを開始（進行中の旧検索は次のチェックポイントで打ち切られる）
     let gen = search::next_generation();
+    let opts = options.unwrap_or_default();
+    let key = (query.clone(), opts);
+    let sort_c = sort_const(&sort.col, sort.asc);
+
+    // 高速パス: 同一クエリ＋オプションなら FFI を一切叩かず、常駐行の表示順インデックスを
+    // 再計算するだけで並べ替える（ヘッダクリック時の全件再取得を回避）。
+    {
+        let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+        if guard.key.as_ref() == Some(&key) && !guard.rows.is_empty() {
+            guard.order = search::sort_order(&guard.rows, sort_c);
+            guard.gen = gen;
+            return Ok(BrowseResult { total: guard.rows.len(), generation: gen, debug: None });
+        }
+    }
 
     // 抽出件数を ~100ms 間隔に間引いて進捗チャンネルへ送る
     let start = Instant::now();
@@ -116,31 +147,32 @@ pub fn browse(
         }
     };
 
-    let rows = match search::browse(
-        &query,
-        sort_const(&sort.col, sort.asc),
-        BROWSE_MAX,
-        options.unwrap_or_default(),
-        gen,
-        on_progress,
-    ) {
+    let rows = match search::browse(&query, BROWSE_MAX, opts, gen, on_progress) {
         Ok(rows) => rows,
         // 後続検索に置き換えられた。世代 0 件として返し、フロントは採用しない
-        Err(search::SearchError::Cancelled) => return Ok(BrowseResult { total: 0, generation: gen }),
+        Err(search::SearchError::Cancelled) => return Ok(BrowseResult { total: 0, generation: gen, debug: None }),
         Err(e) => return Err(e.to_string()),
     };
 
-    // 抽出・ソート完了後に後続検索へ追い越されていたら、スナップショットを確定させない
+    // 抽出完了後に後続検索へ追い越されていたら、スナップショットを確定させない
     // （古い世代で State を上書きして総件数と食い違わせないため）
     if search::current_generation() != gen {
-        return Ok(BrowseResult { total: 0, generation: gen });
+        return Ok(BrowseResult { total: 0, generation: gen, debug: None });
     }
 
+    // 【調査用】0件時はEverything診断情報を付与する。原因判明後に削除する。
+    let debug = if rows.is_empty() {
+        Some(search::diag(&query, opts))
+    } else {
+        None
+    };
+
+    let order = search::sort_order(&rows, sort_c);
     let len = rows.len();
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
-    *guard = (gen, rows);
+    *guard = BrowseSnapshot { gen, key: Some(key), rows, order };
 
-    Ok(BrowseResult { total: len, generation: gen })
+    Ok(BrowseResult { total: len, generation: gen, debug })
 }
 
 /// 直近の `browse` 結果から `[offset, offset+limit)` のウィンドウを返す。
@@ -157,17 +189,18 @@ pub fn fetch_window(
     state: tauri::State<BrowseState>,
 ) -> Result<Vec<WindowRow>, String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
-    let (snapshot_gen, rows) = &*guard;
+    let snap = &*guard;
 
     // 表示中世代と常駐スナップショットの世代が食い違う場合は空を返す
-    if *snapshot_gen != generation || offset >= rows.len() {
+    if snap.gen != generation || offset >= snap.order.len() {
         return Ok(Vec::new());
     }
 
-    let end = (offset + limit).min(rows.len());
-    let window = rows[offset..end]
+    let end = (offset + limit).min(snap.order.len());
+    let window = snap.order[offset..end]
         .iter()
-        .map(|row| {
+        .map(|&i| {
+            let row = &snap.rows[i as usize];
             let path = std::path::Path::new(&row.path);
             let name = path
                 .file_name()

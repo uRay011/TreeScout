@@ -10,6 +10,8 @@ pub struct SearchNode {
     pub g_cost: f32,
     pub h_score: f32,
     pub is_file: bool,
+    /// Everything候補（Phase1結果）に含まれるノードか
+    pub in_phase1: bool,
 }
 
 impl PartialEq for SearchNode {
@@ -41,4 +43,7 @@ pub struct SearchResult {
     pub path: PathBuf,
     /// ファイルの最終スコア（コサイン類似度）
     pub score: f32,
+    /// Phase1結果（Everything候補）に含まれるか。
+    /// `false` の場合はPhase1候補外から見つかったAIサジェスト。
+    pub in_phase1: bool,
 }

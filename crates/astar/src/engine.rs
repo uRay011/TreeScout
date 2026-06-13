@@ -1,4 +1,4 @@
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
 use std::path::Path;
 
 use crate::node::{SearchNode, SearchResult};
@@ -13,11 +13,15 @@ pub struct AstarConfig {
     pub mu: f32,
     /// 返す上位件数
     pub top_k: usize,
+    /// AIサジェストとして採用するスコアの下限値
+    pub suggest_threshold: f32,
+    /// AIサジェストの最大件数
+    pub k_suggest: usize,
 }
 
 impl Default for AstarConfig {
     fn default() -> Self {
-        Self { lambda: 0.1, mu: 0.001, top_k: 20 }
+        Self { lambda: 0.1, mu: 0.001, top_k: 20, suggest_threshold: 0.6, k_suggest: 10 }
     }
 }
 
@@ -58,7 +62,12 @@ where
         Self { config, heuristic, scorer }
     }
 
-    /// 仮想ツリー上で A* 探索を実行し、上位 K 件を返す。
+    /// 仮想ツリー上で A* 探索を実行する。
+    ///
+    /// Phase1候補（Everything結果由来のノード）は全件スコアリングしてヒートマップ用の
+    /// スコアを付与し、取りこぼしなく返す。Phase1候補外のノードも `VirtualTree::expand`
+    /// 経由で探索し、`suggest_threshold` を超えた上位 `k_suggest` 件をAIサジェストとして
+    /// Phase1結果に統合する。
     ///
     /// `callback` には探索ログをリアルタイムで通知する。
     /// Tauri Channel API と組み合わせる際はここでイベントを発行する。
@@ -69,8 +78,12 @@ where
     ) -> Vec<SearchResult> {
         let cfg = &self.config;
         let mut queue: BinaryHeap<SearchNode> = BinaryHeap::new();
-        let mut results: Vec<SearchResult> = Vec::with_capacity(cfg.top_k);
+        let mut phase1_results: Vec<SearchResult> = Vec::new();
+        let mut suggestions: Vec<SearchResult> = Vec::new();
+        let mut visited: HashSet<std::path::PathBuf> = HashSet::new();
         let mut vectorized_count: usize = 0;
+        // Phase1候補ファイルのうち、まだスコア未付与の件数
+        let mut phase1_pending = tree.phase1_file_count();
 
         // ルートノードをキューへ積む
         for root in &tree.roots {
@@ -83,12 +96,18 @@ where
                 g_cost: g,
                 h_score: h,
                 is_file,
+                in_phase1: tree.in_phase1(root),
             });
         }
 
         while let Some(node) = queue.pop() {
-            if results.len() >= cfg.top_k {
+            // Phase1候補を全件スコアリングし、AIサジェストが k_suggest 件揃ったら終了
+            if phase1_pending == 0 && suggestions.len() >= cfg.k_suggest {
                 break;
+            }
+
+            if !visited.insert(node.path.clone()) {
+                continue;
             }
 
             if node.is_file {
@@ -96,10 +115,16 @@ where
                 let score = (self.scorer)(&node.path);
                 vectorized_count += 1;
                 callback.on_found_file(&node.path, score);
-                results.push(SearchResult { path: node.path, score });
+
+                if node.in_phase1 {
+                    phase1_results.push(SearchResult { path: node.path, score, in_phase1: true });
+                    phase1_pending = phase1_pending.saturating_sub(1);
+                } else if score > cfg.suggest_threshold {
+                    suggestions.push(SearchResult { path: node.path, score, in_phase1: false });
+                }
             } else {
-                // ディレクトリ展開
-                let children = tree.children_of(&node.path);
+                // ディレクトリ展開（Phase1候補の子 ＋ 候補外の兄弟/親ディレクトリ）
+                let children = tree.expand(&node.path);
                 if children.is_empty() {
                     continue;
                 }
@@ -107,32 +132,41 @@ where
 
                 let depth = node.path.components().count() as f32;
                 for child in children {
-                    let is_file = tree.is_file(child);
+                    if visited.contains(&child) {
+                        continue;
+                    }
+                    let is_file = tree.is_file(&child);
                     let h = if is_file {
                         // ファイルは親のヒューリスティックを継承（展開前にスコアは不明）
                         node.h_score
                     } else {
-                        (self.heuristic)(child)
+                        (self.heuristic)(&child)
                     };
                     // g = 深さペナルティ + ベクトル化コスト
                     let g = depth * cfg.lambda
                         + vectorized_count as f32 * cfg.mu;
                     let f = h - g;
+                    let in_phase1 = tree.in_phase1(&child);
 
                     queue.push(SearchNode {
-                        path: child.clone(),
+                        path: child,
                         f_score: f,
                         g_cost: g,
                         h_score: h,
                         is_file,
+                        in_phase1,
                     });
                 }
             }
         }
 
-        // スコア降順でソート
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        results
+        // スコア降順でソート。Phase1結果は全件維持し、AIサジェストは上位 k_suggest 件のみ統合する。
+        phase1_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        suggestions.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        suggestions.truncate(cfg.k_suggest);
+
+        phase1_results.extend(suggestions);
+        phase1_results
     }
 }
 
@@ -171,14 +205,17 @@ mod tests {
     }
 
     #[test]
-    fn returns_top_k_results() {
+    fn phase1_results_are_returned_in_full_regardless_of_top_k() {
         let tree = build_tree();
+        // top_k はもはや結果件数を制限しない（Phase1候補は全件スコアリングして返す）
         let config = AstarConfig { top_k: 2, ..Default::default() };
         let engine = AstarEngine::new(config, heuristic, scorer);
         let results = engine.search(&tree, &mut NoopCallback);
-        assert_eq!(results.len(), 2);
+        assert_eq!(results.len(), 4);
         // 最高スコアが先頭
         assert!(results[0].score >= results[1].score);
+        // build_tree の全パスはEverything候補（Phase1）由来
+        assert!(results.iter().all(|r| r.in_phase1));
     }
 
     #[test]
@@ -220,5 +257,34 @@ mod tests {
         engine.search(&tree, &mut cb);
         assert_eq!(cb.files, 4);
         assert!(cb.dirs > 0);
+    }
+
+    #[test]
+    fn expand_explores_extra_dirs_without_affecting_phase1_results() {
+        struct DirCollector {
+            opened: Vec<PathBuf>,
+        }
+        impl ExploreCallback for DirCollector {
+            fn on_open_dir(&mut self, path: &Path, _: f32) { self.opened.push(path.to_path_buf()); }
+            fn on_skip_dir(&mut self, _: &Path, _: f32) {}
+            fn on_found_file(&mut self, _: &Path, _: f32) {}
+        }
+
+        // folders.bin 由来の兄弟ディレクトリ /src/extra を追加登録する
+        let tree = build_tree().with_extra_folders(&[
+            pb("/src/components"),
+            pb("/src/hooks"),
+            pb("/src/utils"),
+            pb("/src/extra"),
+        ]);
+        let config = AstarConfig { lambda: 0.0, mu: 0.0, ..Default::default() };
+        let engine = AstarEngine::new(config, heuristic, scorer);
+        let mut cb = DirCollector { opened: vec![] };
+        let results = engine.search(&tree, &mut cb);
+
+        // Phase1候補のスコアリングは変わらず全件返る
+        assert_eq!(results.iter().filter(|r| r.in_phase1).count(), 4);
+        // 候補外の兄弟ディレクトリ /src/extra も探索対象として開かれる（無限ループせず終了）
+        assert!(cb.opened.contains(&pb("/src/extra")));
     }
 }
