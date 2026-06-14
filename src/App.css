@@ -25,11 +25,27 @@
   --folder:     #c69026;
   --c-tsx:      #58a6ff;
   --c-ts:       #3b82f6;
+  --c-js:       #f7df1e;
   --c-css:      #7ee8fa;
+  --c-scss:     #ff79c6;
+  --c-html:     #ff9462;
   --c-md:       #768390;
   --c-json:     #e3b341;
+  --c-yaml:     #c792ea;
   --c-rs:       #f07178;
-  --c-toml:     #e8b250;
+  --c-toml:     #b08968;
+  --c-sh:       #89e051;
+  --c-pdf:      #ff6b6b;
+  --c-docx:     #7c8cf5;
+  --c-xlsx:     #3ddc97;
+  --c-ppt:      #ffab70;
+  --c-image:    #e895f0;
+  --c-py:       #b5d96a;
+  --c-go:       #3fb8d4;
+  --c-exe:      #7c95b8;
+  --c-zip:      #8a7fd1;
+  --c-cpp:      #4dd0c4;
+  --c-csharp:   #6fcf97;
   --c-other:    #6e7681;
   --font:       'Inter', 'Segoe UI', 'Yu Gothic UI', sans-serif;
   --font-mono:  ui-monospace, 'Cascadia Code', 'Consolas', monospace;
@@ -39,6 +55,7 @@
   --dur-hover: 100ms;
   --dur-enter: 180ms;
   --dur-exit:  120ms;
+  --dur-panel: 240ms;
 
   /* 角丸・ペイン幅 */
   --r-sm:    4px;
@@ -576,11 +593,27 @@ kbd {
 }
 .ext-tsx  { background: rgba(88,166,255,0.18);  color: var(--c-tsx);   border: 1px solid rgba(88,166,255,0.25); }
 .ext-ts   { background: rgba(59,130,246,0.18);  color: var(--c-ts);    border: 1px solid rgba(59,130,246,0.25); }
+.ext-js   { background: rgba(247,223,30,0.15);  color: var(--c-js);    border: 1px solid rgba(247,223,30,0.22); }
 .ext-css  { background: rgba(126,232,250,0.14); color: var(--c-css);   border: 1px solid rgba(126,232,250,0.20); }
+.ext-scss { background: rgba(255,121,198,0.15); color: var(--c-scss);  border: 1px solid rgba(255,121,198,0.22); }
+.ext-html { background: rgba(255,148,98,0.15);  color: var(--c-html);  border: 1px solid rgba(255,148,98,0.22); }
 .ext-md   { background: rgba(118,131,144,0.18); color: var(--c-md);    border: 1px solid rgba(118,131,144,0.25); }
 .ext-json { background: rgba(227,179,65,0.15);  color: var(--c-json);  border: 1px solid rgba(227,179,65,0.22); }
+.ext-yaml { background: rgba(199,146,234,0.15); color: var(--c-yaml);  border: 1px solid rgba(199,146,234,0.22); }
 .ext-rs   { background: rgba(240,113,120,0.15); color: var(--c-rs);    border: 1px solid rgba(240,113,120,0.22); }
-.ext-toml { background: rgba(232,178,80,0.15);  color: var(--c-toml);  border: 1px solid rgba(232,178,80,0.22); }
+.ext-toml { background: rgba(176,137,104,0.18); color: var(--c-toml);  border: 1px solid rgba(176,137,104,0.25); }
+.ext-sh   { background: rgba(137,224,81,0.15);  color: var(--c-sh);    border: 1px solid rgba(137,224,81,0.22); }
+.ext-pdf  { background: rgba(255,107,107,0.15); color: var(--c-pdf);   border: 1px solid rgba(255,107,107,0.22); }
+.ext-docx { background: rgba(124,140,245,0.15); color: var(--c-docx);  border: 1px solid rgba(124,140,245,0.22); }
+.ext-xlsx { background: rgba(61,220,151,0.15);  color: var(--c-xlsx);  border: 1px solid rgba(61,220,151,0.22); }
+.ext-ppt  { background: rgba(255,171,112,0.15); color: var(--c-ppt);   border: 1px solid rgba(255,171,112,0.22); }
+.ext-image{ background: rgba(232,149,240,0.15); color: var(--c-image); border: 1px solid rgba(232,149,240,0.22); }
+.ext-py   { background: rgba(181,217,106,0.15); color: var(--c-py);    border: 1px solid rgba(181,217,106,0.22); }
+.ext-go   { background: rgba(63,184,212,0.15);  color: var(--c-go);    border: 1px solid rgba(63,184,212,0.22); }
+.ext-exe  { background: rgba(124,149,184,0.18); color: var(--c-exe);   border: 1px solid rgba(124,149,184,0.25); }
+.ext-zip  { background: rgba(138,127,209,0.15); color: var(--c-zip);   border: 1px solid rgba(138,127,209,0.22); }
+.ext-cpp  { background: rgba(77,208,196,0.15);  color: var(--c-cpp);   border: 1px solid rgba(77,208,196,0.22); }
+.ext-csharp{ background: rgba(111,207,151,0.15);color: var(--c-csharp);border: 1px solid rgba(111,207,151,0.22); }
 .ext-other{ background: rgba(110,118,129,0.15); color: var(--c-other); border: 1px solid rgba(110,118,129,0.22); }
 
 /* AIサジェストバッジ: Everything絞り込み候補外からA*が発見した結果に付与（AIガイドパスラインと同系色） */
@@ -812,6 +845,7 @@ kbd {
   z-index: 0;
   background: var(--heat-bg, transparent);
   opacity: calc(var(--heat-opacity, 0) * var(--heat-alpha-max));
+  transition: opacity var(--dur-panel) var(--ease-out);
   pointer-events: none;
 }
 
@@ -835,7 +869,32 @@ kbd {
   z-index: 2;
 }
 
-.col-icon  { display: flex; align-items: center; flex-shrink: 0; }
+.col-icon  { display: flex; align-items: center; flex-shrink: 0; color: var(--text2); }
+.col-item .col-icon.ico-folder { color: var(--folder); }
+/* 拡張子ごとの色分け：開発・事務でよく使うファイルはツール連想色、マイナーな拡張子は無彩色のまま */
+.col-item .col-icon.ico-ts     { color: var(--c-ts); }
+.col-item .col-icon.ico-tsx    { color: var(--c-tsx); }
+.col-item .col-icon.ico-js     { color: var(--c-js); }
+.col-item .col-icon.ico-css    { color: var(--c-css); }
+.col-item .col-icon.ico-scss   { color: var(--c-scss); }
+.col-item .col-icon.ico-html   { color: var(--c-html); }
+.col-item .col-icon.ico-json   { color: var(--c-json); }
+.col-item .col-icon.ico-yaml   { color: var(--c-yaml); }
+.col-item .col-icon.ico-rs     { color: var(--c-rs); }
+.col-item .col-icon.ico-toml   { color: var(--c-toml); }
+.col-item .col-icon.ico-sh     { color: var(--c-sh); }
+.col-item .col-icon.ico-md     { color: var(--c-md); }
+.col-item .col-icon.ico-pdf    { color: var(--c-pdf); }
+.col-item .col-icon.ico-docx   { color: var(--c-docx); }
+.col-item .col-icon.ico-xlsx   { color: var(--c-xlsx); }
+.col-item .col-icon.ico-ppt    { color: var(--c-ppt); }
+.col-item .col-icon.ico-image  { color: var(--c-image); }
+.col-item .col-icon.ico-py     { color: var(--c-py); }
+.col-item .col-icon.ico-go     { color: var(--c-go); }
+.col-item .col-icon.ico-exe    { color: var(--c-exe); }
+.col-item .col-icon.ico-zip    { color: var(--c-zip); }
+.col-item .col-icon.ico-cpp    { color: var(--c-cpp); }
+.col-item .col-icon.ico-csharp { color: var(--c-csharp); }
 .col-name  {
   flex: 1;
   overflow: hidden;
