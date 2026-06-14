@@ -140,6 +140,8 @@ export interface SemanticResult {
   is_dir: boolean;
   score: number;
   is_suggestion: boolean;
+  size: number;
+  modified: string;
 }
 
 export type ExploreEvent =
@@ -166,6 +168,9 @@ export interface AstarColumn {
   label: string;
   entries: AstarEntry[];
   activeEntryPath: string | null;
+  /** このカラムが表示しているフォルダの実パス（fillMissingEntries で全件補完する際に使う）。
+   *  rootPath未指定時のcol-0（仮想的な「PC」）は undefined */
+  dirPath?: string;
 }
 
 export function basename(path: string): string {
@@ -197,115 +202,143 @@ function formatDirLabel(path: string): string {
   return basename(path) || path;
 }
 
+/** dirname() や rootPath/エントリパスの末尾区切り文字（ドライブルート "C:\" 等）を揃えて
+ *  byParent のキーが一致するようにする */
+function normalizeDir(path: string): string {
+  return path.replace(/[\\/]+$/, "") || path;
+}
+
 /**
  * ExploreEvent の系列から探索型カラムUI用の AstarColumn[] を構築する。
- * パスの深さをカラムインデックスとして割り当て、open_dir/skip_dir はそのフォルダ自身を
- * 親カラムのエントリとして、found_file は最も深いカラムへ確定エントリとして追加する。
  *
- * 各カラムのヘッダーラベルは「そのカラムに並ぶエントリの親フォルダ名」になる
- * （= 1つ浅いカラムで open_dir されたフォルダ名）。col-0 はルート未指定時は
- * 仮想的な「PC」、ルート指定時はルートフォルダ自身。
+ * まずイベントを (カラムインデックス, 親フォルダパス) ごとにグルーピングする。
+ * カラムNの内容は「1つ左のカラムで最もスコアの高いフォルダ（=展開先）の子」だけに限定し、
+ * 探索順序が先だった兄弟フォルダ（例: 別年度のフォルダ）のイベントが混入しないようにする。
  *
- * rootPath 指定時は一番左のカラムをルートフォルダ自身に固定し、
- * ルートより上位階層のフォルダ（祖先ディレクトリ）のイベントは非表示にする。
+ * col-0 はルート未指定時は仮想的な「PC」（ドライブ一覧）、ルート指定時はルートフォルダ自身
+ * （中身は col-1 に並ぶ）。col-1 以降は、1つ左のカラムで is_dir のエントリのうち
+ * スコア最大のものを「展開先」として選び、その子をエントリにする。
  *
  * `allDrives` を渡すと（rootPath未指定時のみ）col-0に、探索で一度も触れられていない
  * ドライブも非ヒット（skipped）として追加表示する。
  */
 export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string, allDrives?: string[]): AstarColumn[] {
-  const columns: AstarColumn[] = [];
-  let baseDepth: number | null = null;
+  let baseDepth: number | null = rootPath ? pathDepth(rootPath) : null;
 
-  if (rootPath) {
-    baseDepth = pathDepth(rootPath);
-    columns.push({ id: "col-0", label: basename(rootPath) || rootPath, entries: [], activeEntryPath: null });
-  }
+  const allByIdx = new Map<number, AstarEntry[]>();
+  const byParent = new Map<string, AstarEntry[]>();
 
-  const ensureColumn = (idx: number): AstarColumn => {
-    while (columns.length <= idx) {
-      columns.push({ id: `col-${columns.length}`, label: "", entries: [], activeEntryPath: null });
-    }
-    return columns[idx];
-  };
-
-  // 先勝ちでラベルを確定する（後続の兄弟探索で上書きしない）
-  const setLabelIfEmpty = (idx: number, label: string) => {
-    if (idx < 0) return;
-    const col = ensureColumn(idx);
-    if (!col.label) col.label = label;
-  };
-
-  const ensureBaseDepth = (depth: number) => {
-    if (baseDepth === null) {
-      baseDepth = depth;
-      if (!rootPath) setLabelIfEmpty(0, "PC");
-    }
+  const upsert = (arr: AstarEntry[], entry: AstarEntry) => {
+    // 同一パスの再探索（h_score更新）は既存行を上書きし、重複行を防ぐ
+    const existing = arr.findIndex(e => e.path === entry.path);
+    if (existing >= 0) arr[existing] = entry;
+    else arr.push(entry);
   };
 
   for (const ev of events) {
-    switch (ev.type) {
-      case "open_dir":
-      case "skip_dir": {
-        const depth = pathDepth(ev.path);
-        ensureBaseDepth(depth);
-        const idx = depth - (baseDepth as number);
-        if (idx < 0) break; // ルートより上位階層は非表示
-        const col = ensureColumn(idx);
-        const entry: AstarEntry = {
-          path: ev.path,
-          name: basename(ev.path),
-          ext: "",
-          is_dir: true,
-          score: ev.h_score,
-          kind: ev.type === "open_dir" ? "opened" : "skipped",
-        };
-        // 同一パスの再探索（h_score更新）は既存行を上書きし、重複行を防ぐ
-        const existing = col.entries.findIndex(e => e.path === ev.path);
-        if (existing >= 0) col.entries[existing] = entry;
-        else col.entries.push(entry);
-        // open_dir で開いたフォルダの中身は1つ右のカラムに並ぶ → そのヘッダーラベルになる
-        if (ev.type === "open_dir") setLabelIfEmpty(idx + 1, formatDirLabel(ev.path));
-        break;
-      }
-      case "found_file": {
-        const depth = pathDepth(ev.path);
-        ensureBaseDepth(depth);
-        const idx = depth - (baseDepth as number);
-        if (idx < 0) break; // ルートより上位階層は非表示
-        const col = ensureColumn(idx);
-        // 通常は親フォルダの open_dir で既にラベル確定済みだが、保険として親フォルダ名を設定する
-        setLabelIfEmpty(idx, formatDirLabel(dirname(ev.path)) || "結果");
-        const entry: AstarEntry = {
-          path: ev.path,
-          name: basename(ev.path),
-          ext: extname(ev.path),
-          is_dir: false,
-          score: ev.score,
-          kind: "found",
-        };
-        const existing = col.entries.findIndex(e => e.path === ev.path);
-        if (existing >= 0) col.entries[existing] = entry;
-        else col.entries.push(entry);
-        col.activeEntryPath = ev.path;
-        break;
-      }
-    }
+    const depth = pathDepth(ev.path);
+    if (baseDepth === null) baseDepth = depth;
+    const idx = depth - baseDepth;
+    if (idx < 0) continue; // ルートより上位階層は非表示
+
+    const entry: AstarEntry = ev.type === "found_file"
+      ? { path: ev.path, name: basename(ev.path), ext: extname(ev.path), is_dir: false, score: ev.score, kind: "found" }
+      : { path: ev.path, name: basename(ev.path), ext: "", is_dir: true, score: ev.h_score, kind: ev.type === "open_dir" ? "opened" : "skipped" };
+
+    if (!allByIdx.has(idx)) allByIdx.set(idx, []);
+    upsert(allByIdx.get(idx)!, entry);
+
+    const parentKey = `${idx} ${normalizeDir(dirname(ev.path))}`;
+    if (!byParent.has(parentKey)) byParent.set(parentKey, []);
+    upsert(byParent.get(parentKey)!, entry);
   }
 
-  // rootPath未指定時のみ: col-0（PC階層）に未探索ドライブを非ヒット表示として補完する
-  if (!rootPath && allDrives && allDrives.length > 0) {
-    const col0 = ensureColumn(0);
-    if (!col0.label) col0.label = "PC";
-    const present = new Set(col0.entries.map(e => basename(e.path).toUpperCase()));
-    for (const drive of allDrives) {
-      const name = basename(drive) || drive;
-      if (present.has(name.toUpperCase())) continue;
-      col0.entries.push({ path: drive, name, ext: "", is_dir: true, score: 0, kind: "skipped" });
+  const columns: AstarColumn[] = [];
+  if (rootPath) {
+    columns.push({
+      id: "col-0",
+      label: basename(rootPath) || rootPath,
+      entries: byParent.get(`0 ${normalizeDir(rootPath)}`) ?? [],
+      activeEntryPath: null,
+      dirPath: rootPath,
+    });
+  } else if (allByIdx.size > 0 || (allDrives && allDrives.length > 0)) {
+    const entries = [...(allByIdx.get(0) ?? [])];
+    if (allDrives && allDrives.length > 0) {
+      const present = new Set(entries.map(e => basename(e.path).toUpperCase()));
+      for (const drive of allDrives) {
+        const name = basename(drive) || drive;
+        if (present.has(name.toUpperCase())) continue;
+        entries.push({ path: drive, name, ext: "", is_dir: true, score: 0, kind: "skipped" });
+      }
+      entries.sort((a, b) => a.name.localeCompare(b.name));
     }
-    col0.entries.sort((a, b) => a.name.localeCompare(b.name));
+    columns.push({ id: "col-0", label: "PC", entries, activeEntryPath: null });
+  } else {
+    return [];
+  }
+
+  // 1つ左のカラムで最もスコアの高いフォルダを「展開先」として選び、その子を次カラムにする
+  let idx = 0;
+  while (allByIdx.has(idx + 1)) {
+    let dirPath: string;
+    if (idx === 0 && rootPath) {
+      dirPath = rootPath;
+    } else {
+      const best = columns[idx].entries
+        .filter(e => e.is_dir)
+        .reduce<AstarEntry | null>((b, e) => (b === null || e.score > b.score) ? e : b, null);
+      if (!best) break;
+      dirPath = best.path;
+      columns[idx].activeEntryPath = best.path;
+    }
+    columns.push({
+      id: `col-${idx + 1}`,
+      label: formatDirLabel(dirPath),
+      entries: byParent.get(`${idx + 1} ${normalizeDir(dirPath)}`) ?? [],
+      activeEntryPath: null,
+      dirPath,
+    });
+    idx++;
+  }
+
+  // 最終カラム: 最もスコアの高いエントリ（found/opened/skipped問わず）をAIの注目先として強調する
+  const lastCol = columns[columns.length - 1];
+  if (lastCol.activeEntryPath === null && lastCol.entries.length > 0) {
+    const best = lastCol.entries.reduce<AstarEntry | null>((b, e) => (b === null || e.score > b.score) ? e : b, null);
+    if (best) lastCol.activeEntryPath = best.path;
   }
 
   return columns;
+}
+
+/**
+ * 各カラムの `dirPath`（=実フォルダパス）を listDirectory で取得し、A*探索で
+ * 一度も触れられなかったエントリを非ヒット（skipped）として補完する。
+ *
+ * 探索ログには「ヒットへの経路上のフォルダ／ファイル」しか登場しないため、
+ * 何もしないとそのフォルダの他の中身（例: Eドライブ直下のDocument以外のフォルダ）が
+ * 一切表示されない。検索完了後に1回だけ呼び、全件表示に補完する。
+ */
+export async function fillMissingEntries(columns: AstarColumn[], query?: string): Promise<AstarColumn[]> {
+  return Promise.all(
+    columns.map(async (col) => {
+      if (!col.dirPath) return col;
+      try {
+        const children = await listDirectory(col.dirPath, query);
+        const present = new Set(col.entries.map(e => e.path));
+        const extra: AstarEntry[] = children
+          .filter(c => !present.has(c.path))
+          .map(c => ({ path: c.path, name: c.name, ext: c.ext, is_dir: c.is_dir, score: 0, kind: "skipped" }));
+        if (extra.length === 0) return col;
+        const entries = [...col.entries, ...extra];
+        entries.sort((a, b) => (b.is_dir ? 1 : 0) - (a.is_dir ? 1 : 0) || a.name.localeCompare(b.name));
+        return { ...col, entries };
+      } catch {
+        return col;
+      }
+    }),
+  );
 }
 
 export interface SemanticSearchOptions {
