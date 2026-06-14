@@ -16,6 +16,7 @@ import {
   AstarColumn,
   AstarEntry,
   buildColumnsFromEvents,
+  fillMissingEntries,
   basename,
   listDirectory,
   listDrives,
@@ -206,6 +207,12 @@ export default function App() {
   // ルートフォルダ（探索範囲の絞り込み。既定は未指定＝ドライブ全体）
   const [rootPath, setRootPath] = useState("");
 
+  // 「PC」階層に表示する論理ドライブ一覧（検索結果0件のドライブもグレー表示するため）
+  const [allDrives, setAllDrives] = useState<string[]>([]);
+  useEffect(() => {
+    listDrives().then(setAllDrives).catch(() => {});
+  }, []);
+
   // 検索モード（AI / フィルタ）と左ペインのデータ供給モード（配列 / 窓取得）
   const [searchMode, setSearchMode] = useState<SearchMode>(loadSearchMode);
   const [leftPaneMode, setLeftPaneMode] = useState<"array" | "window">("array");
@@ -347,7 +354,7 @@ export default function App() {
         onExplore: (ev) => {
           if (seq !== searchSeqRef.current) return; // 古い実行からの遅延イベントは無視（カラム重複防止）
           exploreEventsRef.current.push(ev);
-          setColumns(buildColumnsFromEvents(exploreEventsRef.current, rootPath));
+          setColumns(buildColumnsFromEvents(exploreEventsRef.current, rootPath, allDrives));
           if (!phaseAdvanced) {
             phaseAdvanced = true;
             setPhase("Phase 2: A*探索…");
@@ -360,6 +367,16 @@ export default function App() {
         },
       });
       if (seq !== searchSeqRef.current) return;
+
+      // 探索ログには「ヒットへの経路」しか登場しないため、各カラムの実フォルダを
+      // listDirectory で読み直し、A*が触れなかった他のエントリを非ヒット表示で補完する
+      try {
+        const filled = await fillMissingEntries(buildColumnsFromEvents(exploreEventsRef.current, rootPath, allDrives), query);
+        if (seq === searchSeqRef.current) setColumns(filled);
+      } catch {
+        // 補完に失敗しても探索ログベースのカラム表示はそのまま残す
+      }
+
       // SemanticResult → SearchResult（ResultList 互換）に変換
       const normalized: SearchResult[] = items.map(r => ({
         name: r.name,
@@ -367,8 +384,8 @@ export default function App() {
         folder: r.path.replace(/[\\/][^\\/]+$/, "") || r.path,
         is_dir: r.is_dir,
         ext: r.ext,
-        size: 0,
-        modified: "",
+        size: r.size,
+        modified: r.modified,
         score: r.score,
         is_suggestion: r.is_suggestion,
       }));
@@ -383,7 +400,7 @@ export default function App() {
     } finally {
       if (seq === searchSeqRef.current) setIsLoading(false);
     }
-  }, [query, rootPath, searchMode, browseSort, searchOptions, browseWin.runBrowse, startElapsedTimer, stopElapsedTimer]);
+  }, [query, rootPath, searchMode, browseSort, searchOptions, browseWin.runBrowse, startElapsedTimer, stopElapsedTimer, allDrives]);
 
   // ルートフォルダ選択ダイアログ
   const handleBrowseRoot = useCallback(async () => {
