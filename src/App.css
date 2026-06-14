@@ -46,6 +46,11 @@
   --c-zip:      #8a7fd1;
   --c-cpp:      #4dd0c4;
   --c-csharp:   #6fcf97;
+  --c-video:    #ff6b9d;
+  --c-audio:    #bd93f9;
+  --c-java:     #e76f51;
+  --c-dart:     #5dc9f1;
+  --c-txt:      #a8a29e;
   --c-other:    #6e7681;
   --font:       'Inter', 'Segoe UI', 'Yu Gothic UI', sans-serif;
   --font-mono:  ui-monospace, 'Cascadia Code', 'Consolas', monospace;
@@ -614,6 +619,11 @@ kbd {
 .ext-zip  { background: rgba(138,127,209,0.15); color: var(--c-zip);   border: 1px solid rgba(138,127,209,0.22); }
 .ext-cpp  { background: rgba(77,208,196,0.15);  color: var(--c-cpp);   border: 1px solid rgba(77,208,196,0.22); }
 .ext-csharp{ background: rgba(111,207,151,0.15);color: var(--c-csharp);border: 1px solid rgba(111,207,151,0.22); }
+.ext-video{ background: rgba(255,107,157,0.15); color: var(--c-video); border: 1px solid rgba(255,107,157,0.22); }
+.ext-audio{ background: rgba(189,147,249,0.15); color: var(--c-audio); border: 1px solid rgba(189,147,249,0.22); }
+.ext-java { background: rgba(231,111,81,0.15);  color: var(--c-java);  border: 1px solid rgba(231,111,81,0.22); }
+.ext-dart { background: rgba(93,201,241,0.15);  color: var(--c-dart);  border: 1px solid rgba(93,201,241,0.22); }
+.ext-txt  { background: rgba(168,162,158,0.15); color: var(--c-txt);   border: 1px solid rgba(168,162,158,0.22); }
 .ext-other{ background: rgba(110,118,129,0.15); color: var(--c-other); border: 1px solid rgba(110,118,129,0.22); }
 
 /* AIサジェストバッジ: Everything絞り込み候補外からA*が発見した結果に付与（AIガイドパスラインと同系色） */
@@ -895,6 +905,11 @@ kbd {
 .col-item .col-icon.ico-zip    { color: var(--c-zip); }
 .col-item .col-icon.ico-cpp    { color: var(--c-cpp); }
 .col-item .col-icon.ico-csharp { color: var(--c-csharp); }
+.col-item .col-icon.ico-video  { color: var(--c-video); }
+.col-item .col-icon.ico-audio  { color: var(--c-audio); }
+.col-item .col-icon.ico-java   { color: var(--c-java); }
+.col-item .col-icon.ico-dart   { color: var(--c-dart); }
+.col-item .col-icon.ico-txt    { color: var(--c-txt); }
 .col-name  {
   flex: 1;
   overflow: hidden;

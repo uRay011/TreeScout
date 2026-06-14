@@ -22,14 +22,36 @@ type ObserveOffsetCallback = (offset: number, isScrolling: boolean) => void;
 
 type SortCol = "score" | "name" | "folder" | "size" | "date";
 
+// 拡張子 → バッジ着色クラス（ColumnView側のアイコン配色と揃える、design.md参照）
 const EXT_CLASS: Record<string, string> = {
-  tsx:  "ext-tsx",
-  ts:   "ext-ts",
-  css:  "ext-css",
-  md:   "ext-md",
-  json: "ext-json",
-  rs:   "ext-rs",
+  ts: "ext-ts", tsx: "ext-tsx",
+  js: "ext-js", jsx: "ext-js", mjs: "ext-js", cjs: "ext-js",
+  css: "ext-css",
+  scss: "ext-scss", sass: "ext-scss", less: "ext-scss",
+  html: "ext-html", htm: "ext-html",
+  json: "ext-json", json5: "ext-json", jsonc: "ext-json", jsonl: "ext-json", ndjson: "ext-json",
+  yaml: "ext-yaml", yml: "ext-yaml",
+  rs: "ext-rs",
   toml: "ext-toml",
+  sh: "ext-sh", bash: "ext-sh", zsh: "ext-sh", ps1: "ext-sh",
+  md: "ext-md", markdown: "ext-md",
+  txt: "ext-txt",
+  pdf: "ext-pdf",
+  doc: "ext-docx", docx: "ext-docx", rtf: "ext-docx",
+  xls: "ext-xlsx", xlsx: "ext-xlsx", xlsm: "ext-xlsx", csv: "ext-xlsx",
+  ppt: "ext-ppt", pptx: "ext-ppt",
+  png: "ext-image", jpg: "ext-image", jpeg: "ext-image", gif: "ext-image",
+  webp: "ext-image", svg: "ext-image", bmp: "ext-image", ico: "ext-image",
+  py: "ext-py", pyw: "ext-py", pkl: "ext-py", pickle: "ext-py",
+  go: "ext-go",
+  exe: "ext-exe", dll: "ext-exe", msi: "ext-exe",
+  zip: "ext-zip", rar: "ext-zip", "7z": "ext-zip", tar: "ext-zip", gz: "ext-zip", bz2: "ext-zip",
+  c: "ext-cpp", h: "ext-cpp", cpp: "ext-cpp", cc: "ext-cpp", cxx: "ext-cpp", hpp: "ext-cpp", hh: "ext-cpp", hxx: "ext-cpp",
+  cs: "ext-csharp",
+  java: "ext-java",
+  dart: "ext-dart",
+  mp4: "ext-video", avi: "ext-video", mov: "ext-video", mkv: "ext-video", wmv: "ext-video", webm: "ext-video", flv: "ext-video", m4v: "ext-video",
+  mp3: "ext-audio", wav: "ext-audio", flac: "ext-audio", aac: "ext-audio", ogg: "ext-audio", m4a: "ext-audio", wma: "ext-audio",
 };
 
 function extClass(ext: string) {
@@ -247,7 +269,7 @@ export function ResultList({ results, windowSource, sort, onSortChange, selected
     <div className={`left-pane${isMd ? " w-md" : ""}${isLg ? " w-lg" : ""}${viewClass}`} id="leftPane" ref={paneRef}>
       {/* ── ヘッダー ── */}
       <div className="list-header" role="row">
-        {hasScore && <ColHeader col="score"  label="一致"     className="col-h-score" />}
+        {hasScore && <ColHeader col="score"  label="スコア"   className="col-h-score" />}
         <ColHeader col="name"   label="名前"     className="col-h-name" />
         <ColHeader col="folder" label="フォルダ" className="col-h-folder" />
         <ColHeader col="size"   label="サイズ"   className="col-h-size" />

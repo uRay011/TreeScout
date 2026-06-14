@@ -38,6 +38,7 @@ const CODE_SHAPE_EXT = new Set([
   "html", "htm", "json", "json5", "jsonc", "jsonl", "ndjson", "yaml", "yml", "toml", "rs", "sh", "bash", "zsh", "ps1",
   "py", "pyw", "go",
   "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "cs",
+  "java", "dart",
 ]);
 const TEXT_SHAPE_EXT = new Set(["md", "markdown", "txt", "csv", "rtf"]);
 
@@ -54,9 +55,10 @@ const EXT_COLOR_CLASS: Record<string, string> = {
   toml: "ico-toml",
   sh: "ico-sh", bash: "ico-sh", zsh: "ico-sh", ps1: "ico-sh",
   md: "ico-md", markdown: "ico-md",
+  txt: "ico-txt",
   pdf: "ico-pdf",
   doc: "ico-docx", docx: "ico-docx", rtf: "ico-docx",
-  xls: "ico-xlsx", xlsx: "ico-xlsx", csv: "ico-xlsx",
+  xls: "ico-xlsx", xlsx: "ico-xlsx", xlsm: "ico-xlsx", csv: "ico-xlsx",
   ppt: "ico-ppt", pptx: "ico-ppt",
   png: "ico-image", jpg: "ico-image", jpeg: "ico-image", gif: "ico-image",
   webp: "ico-image", svg: "ico-image", bmp: "ico-image", ico: "ico-image",
@@ -67,6 +69,10 @@ const EXT_COLOR_CLASS: Record<string, string> = {
   zip: "ico-zip", rar: "ico-zip", "7z": "ico-zip", tar: "ico-zip", gz: "ico-zip", bz2: "ico-zip",
   c: "ico-cpp", h: "ico-cpp", cpp: "ico-cpp", cc: "ico-cpp", cxx: "ico-cpp", hpp: "ico-cpp", hh: "ico-cpp", hxx: "ico-cpp",
   cs: "ico-csharp",
+  java: "ico-java",
+  dart: "ico-dart",
+  mp4: "ico-video", avi: "ico-video", mov: "ico-video", mkv: "ico-video", wmv: "ico-video", webm: "ico-video", flv: "ico-video", m4v: "ico-video",
+  mp3: "ico-audio", wav: "ico-audio", flac: "ico-audio", aac: "ico-audio", ogg: "ico-audio", m4a: "ico-audio", wma: "ico-audio",
 };
 
 // 拡張子 → アイコンの種類とCSSクラス
