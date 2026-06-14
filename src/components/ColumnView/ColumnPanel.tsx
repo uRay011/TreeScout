@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { motion } from "framer-motion";
 import { AstarColumn, AstarEntry } from "../../lib/tauri";
 import { HeatmapItem } from "./HeatmapItem";
@@ -14,7 +15,9 @@ interface Props {
   hasScore: boolean;
 }
 
-export function ColumnPanel({ column, colIndex, onEntrySelect, isLast, showGuide, hasScore }: Props) {
+// memo化により、検索ボックスへの打鍵などでAppが再レンダーしても、column等のpropsが
+// 変わらないカラムは再調整をスキップする（onEntrySelectは呼び出し側で安定参照にしてある）。
+export const ColumnPanel = memo(function ColumnPanel({ column, colIndex, onEntrySelect, isLast, showGuide, hasScore }: Props) {
   return (
     // カラム全体が左からスライドイン（コラム単位のアニメーション）
     <motion.div
@@ -38,13 +41,13 @@ export function ColumnPanel({ column, colIndex, onEntrySelect, isLast, showGuide
 
       {/* アイテムリスト */}
       <div className="col-body">
-        {column.entries.map((entry, i) => (
+        {column.entries.map((entry) => (
           <HeatmapItem
             key={entry.path}
             entry={entry}
             isActive={column.activeEntryPath === entry.path}
-            index={i}
-            onSelect={(e) => onEntrySelect(colIndex, e)}
+            colIndex={colIndex}
+            onSelect={onEntrySelect}
             hasScore={hasScore}
           />
         ))}
@@ -58,4 +61,4 @@ export function ColumnPanel({ column, colIndex, onEntrySelect, isLast, showGuide
         )}
       </div></motion.div>
   );
-}
+});

@@ -1,5 +1,4 @@
-import type { ReactElement } from "react";
-import { motion } from "framer-motion";
+import { memo, type ReactElement } from "react";
 import { ArrowRight, ChevronRight } from "lucide-react";
 import { AstarEntry } from "../../lib/tauri";
 import { heatmapStyle, scoreTier, TIER_LABELS } from "../../lib/heatmap";
@@ -88,34 +87,30 @@ function fileIconFor(ext: string): { icon: ReactElement; className: string } {
 interface Props {
   entry: AstarEntry;
   isActive: boolean;
-  index: number;
-  onSelect: (entry: AstarEntry) => void;
+  colIndex: number;
+  onSelect: (colIndex: number, entry: AstarEntry) => void;
   /** 検索キーワード未入力時はスコア0=「最低スコア」ではなく「スコアなし」として無着色にする */
   hasScore: boolean;
 }
 
-export function HeatmapItem({ entry, isActive, index, onSelect, hasScore }: Props) {
+// 広域クエリ（"AI"等）ではカラムに数百〜数千エントリが載る。各アイテムをFramer Motion
+// (motion.button) にすると、マウント時の入場アニメ＋毎レンダーの再調整がメインスレッドを
+// 数秒〜十数秒占有し、検索完了後の入力反映まで遅延させる。素のbutton＋memoで、
+// 不要な再レンダー（親=ColumnPanelがmemoでスキップされる限り）を止める。
+export const HeatmapItem = memo(function HeatmapItem({ entry, isActive, colIndex, onSelect, hasScore }: Props) {
   const heatStyle = hasScore ? heatmapStyle(entry.score, entry.kind) : undefined;
   const isSkipped = entry.kind === "skipped";
   const tier = scoreTier(entry.score);
   const heatLabel = hasScore && entry.kind === "found" ? `, ${TIER_LABELS[tier]}` : "";
 
   return (
-    <motion.button
+    <button
       type="button"
       role="option"
       aria-selected={isActive}
       aria-label={`${entry.name}${heatLabel}`}
       className={`col-item${isActive ? " active" : ""}${isSkipped ? " skip" : ""}`}
-      onClick={() => onSelect(entry)}
-      // 入場アニメーション: 左からスライドイン + フェード
-      initial={{ opacity: 0, x: -8 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{
-        duration: 0.18,
-        delay: index * 0.04,   // 30~50ms ずつずらしてスタッガー
-        ease: "easeOut",
-      }}
+      onClick={() => onSelect(colIndex, entry)}
       // ヒートマップ背景はオーバーレイ（GPU合成、--heat-* はCSS変数経由でopacityのみ制御）
       style={{ position: "relative", width: "100%", textAlign: "left", ...heatStyle }}
     >
@@ -159,7 +154,7 @@ export function HeatmapItem({ entry, isActive, index, onSelect, hasScore }: Prop
       <span className="col-connector" aria-hidden>
         <ArrowRight width={10} height={10} strokeWidth={1.5} />
       </span>
-    </motion.button>
+    </button>
   );
-}
+});
 
