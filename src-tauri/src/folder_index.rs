@@ -3,53 +3,36 @@
 //! `index::index_folders` / `index::rebuild_folder_matrix` をフロントから
 //! 明示的に呼び出すための薄いアダプタ層。
 //!
-//! 埋め込みモデル（model2vec StaticEmbedder）は未バンドルのため、
-//! 配線確認用にダミー Embedder を暫定使用する。モデル統合時は
-//! `DummyEmbedder` を `embedding::StaticEmbedder` に差し替える。
+//! 埋め込みモデルは `tauri.conf.json` の `bundle.resources` で
+//! `resources/embedding-model/`（model2vec, tokenizer.json/model.safetensors/config.json）
+//! としてバンドルされ、`StaticEmbedder::from_dir` でロードする。
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
-use embedding::Embedder;
+use embedding::{Embedder, StaticEmbedder};
 use index::{index_folders, rebuild_folder_matrix, FolderEmbeddingMatrix, IndexStore};
 use serde::Serialize;
+use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager};
 
-/// folder_indexer 配線確認用のダミー埋め込み器
-///
-/// フォルダ名の文字数からハッシュ的に決定的なベクトルを生成するだけで、
-/// 意味的な類似度は持たない。`StaticEmbedder` 統合までの暫定実装。
-struct DummyEmbedder {
-    dim: usize,
-}
-
-impl Embedder for DummyEmbedder {
-    fn embed(&self, texts: &[&str]) -> Vec<Vec<f32>> {
-        texts
-            .iter()
-            .map(|t| {
-                let v = (t.len() as f32 % 10.0) / 10.0;
-                vec![v; self.dim]
-            })
-            .collect()
-    }
-
-    fn dim(&self) -> usize {
-        self.dim
-    }
-}
-
-const FOLDER_EMBEDDING_DIM: usize = 64;
 const EMBED_BATCH_SIZE: usize = 64;
 
-/// フォルダ事前インデックスの永続化先（SQLite + mmap行列）を保持する状態。
+/// フォルダ事前インデックスの永続化先（SQLite + mmap行列）と埋め込みモデルを保持する状態。
+///
+/// 埋め込みモデル（f16, ~256MB）はロードにdebugビルドで約20秒かかるため、
+/// `init` ではバックグラウンドスレッドでロードを開始するだけにし、ウィンドウ表示を
+/// ブロックしない。ロード完了までは `embedder()` が `None` を返すので、
+/// 呼び出し側はAIサジェスト探索を空扱いにする等のフォールバックを行う。
 pub struct FolderIndexState {
     store: Mutex<IndexStore>,
     matrix_path: PathBuf,
+    embedder: Arc<OnceLock<StaticEmbedder>>,
 }
 
 impl FolderIndexState {
-    /// アプリデータディレクトリ配下に SQLite を開いて状態を初期化する。
+    /// アプリデータディレクトリ配下に SQLite を開き、バンドル済みモデルのロードを
+    /// バックグラウンドスレッドで開始して状態を初期化する。
     pub fn init(app: &AppHandle) -> Result<Self, String> {
         let data_dir = app
             .path()
@@ -60,10 +43,40 @@ impl FolderIndexState {
         let store = IndexStore::open(&data_dir.join("index.sqlite")).map_err(|e| e.to_string())?;
         let matrix_path = data_dir.join("folders.bin");
 
+        let model_dir = app
+            .path()
+            .resolve("resources/embedding-model", BaseDirectory::Resource)
+            .map_err(|e| e.to_string())?;
+
+        let embedder: Arc<OnceLock<StaticEmbedder>> = Arc::new(OnceLock::new());
+        {
+            let embedder = embedder.clone();
+            std::thread::spawn(move || match StaticEmbedder::from_dir(&model_dir) {
+                Ok(e) => {
+                    let _ = embedder.set(e);
+                }
+                Err(err) => {
+                    eprintln!("埋め込みモデルのロードに失敗しました: {err}");
+                }
+            });
+        }
+
         Ok(Self {
             store: Mutex::new(store),
             matrix_path,
+            embedder,
         })
+    }
+
+    /// クエリ・フォルダ名の埋め込みに使うモデル。バックグラウンドロードが未完了なら `None`。
+    pub fn embedder(&self) -> Option<&StaticEmbedder> {
+        self.embedder.get()
+    }
+
+    /// 事前構築済みのフォルダ embedding 行列を mmap で開く。
+    /// 未構築（初回起動など）の場合は `Err` を返すので、呼び出し側で空扱いにフォールバックする。
+    pub fn load_matrix(&self) -> Result<FolderEmbeddingMatrix, String> {
+        FolderEmbeddingMatrix::open(&self.matrix_path).map_err(|e| e.to_string())
     }
 }
 
@@ -83,14 +96,16 @@ pub fn index_folders_command(
     state: tauri::State<FolderIndexState>,
     root: String,
 ) -> Result<FolderIndexResult, String> {
-    let embedder = DummyEmbedder { dim: FOLDER_EMBEDDING_DIM };
+    let embedder = state
+        .embedder()
+        .ok_or_else(|| "埋め込みモデルをロード中です。しばらく待ってから再実行してください".to_string())?;
     let store = state.store.lock().map_err(|e| e.to_string())?;
 
-    let stats = index_folders(&store, std::path::Path::new(&root), &embedder, EMBED_BATCH_SIZE)
+    let stats = index_folders(&store, std::path::Path::new(&root), embedder, EMBED_BATCH_SIZE)
         .map_err(|e| e.to_string())?;
 
     let matrix: FolderEmbeddingMatrix =
-        rebuild_folder_matrix(&store, &state.matrix_path, FOLDER_EMBEDDING_DIM)
+        rebuild_folder_matrix(&store, &state.matrix_path, embedder.dim())
             .map_err(|e| e.to_string())?;
 
     Ok(FolderIndexResult {

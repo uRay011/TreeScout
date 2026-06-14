@@ -5,6 +5,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use astar::{AstarConfig, ExploreCallback};
+use embedding::Embedder;
 use nlp::parse_query;
 use pipeline::{run_with_paths, scoring};
 use search::{MatchOptions, SearchError, SearchResult as EvResult};
@@ -14,6 +15,11 @@ use browse_session::{browse, fetch_window, BrowseSnapshot, BrowseState};
 
 mod folder_index;
 use folder_index::{index_folders_command, FolderIndexState};
+
+/// AIサジェスト探索: folders.bin から取得するクエリ近傍フォルダの最大件数
+const EXTRA_FOLDER_TOP_N: usize = 20;
+/// AIサジェスト探索: 近傍フォルダとして採用するcosine類似度の下限
+const EXTRA_FOLDER_MIN_SIMILARITY: f32 = 0.3;
 
 // ── Phase 1 既存コマンド（後方互換） ────────────────────────
 #[tauri::command(async)]
@@ -142,39 +148,72 @@ pub enum ExploreEvent {
     FoundFile { path: String, score: f32 },
 }
 
-/// Channel 経由で探索ログを emit するコールバック
+/// 探索ログのコアレス間隔（CLAUDE.md記載の方針に合わせ ~16ms 単位でまとめて送る）
+const EXPLORE_EVENT_COALESCE: std::time::Duration = std::time::Duration::from_millis(16);
+
+/// Channel 経由で探索ログをバッチ emit するコールバック。
+///
+/// ノードごとに `app.emit()` すると、JSON シリアライズ＋WebView2へのIPC往復が
+/// A* の探索ループ自体を支配するコストになる（広域クエリでは数千〜数万ノード visit）。
+/// バッファに溜め、~16ms ごと（および探索終了時の Drop）にまとめて1イベントとして送る。
 struct TauriCallback {
     app: AppHandle,
     channel: String,
+    buffer: Vec<ExploreEvent>,
+    last_emit: std::time::Instant,
+}
+
+impl TauriCallback {
+    fn new(app: AppHandle, channel: String) -> Self {
+        Self {
+            app,
+            channel,
+            buffer: Vec::new(),
+            last_emit: std::time::Instant::now(),
+        }
+    }
+
+    fn push(&mut self, ev: ExploreEvent) {
+        self.buffer.push(ev);
+        if self.last_emit.elapsed() >= EXPLORE_EVENT_COALESCE {
+            self.flush();
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.buffer.is_empty() {
+            return;
+        }
+        let batch = std::mem::take(&mut self.buffer);
+        let _ = self.app.emit(&self.channel, batch);
+        self.last_emit = std::time::Instant::now();
+    }
+}
+
+impl Drop for TauriCallback {
+    fn drop(&mut self) {
+        self.flush();
+    }
 }
 
 impl ExploreCallback for TauriCallback {
     fn on_open_dir(&mut self, path: &std::path::Path, h_score: f32) {
-        let _ = self.app.emit(
-            &self.channel,
-            ExploreEvent::OpenDir {
-                path: path.to_string_lossy().into_owned(),
-                h_score,
-            },
-        );
+        self.push(ExploreEvent::OpenDir {
+            path: path.to_string_lossy().into_owned(),
+            h_score,
+        });
     }
     fn on_skip_dir(&mut self, path: &std::path::Path, h_score: f32) {
-        let _ = self.app.emit(
-            &self.channel,
-            ExploreEvent::SkipDir {
-                path: path.to_string_lossy().into_owned(),
-                h_score,
-            },
-        );
+        self.push(ExploreEvent::SkipDir {
+            path: path.to_string_lossy().into_owned(),
+            h_score,
+        });
     }
     fn on_found_file(&mut self, path: &std::path::Path, score: f32) {
-        let _ = self.app.emit(
-            &self.channel,
-            ExploreEvent::FoundFile {
-                path: path.to_string_lossy().into_owned(),
-                score,
-            },
-        );
+        self.push(ExploreEvent::FoundFile {
+            path: path.to_string_lossy().into_owned(),
+            score,
+        });
     }
 }
 
@@ -188,6 +227,7 @@ impl ExploreCallback for TauriCallback {
 #[tauri::command(async)]
 fn semantic_search(
     app: AppHandle,
+    state: tauri::State<FolderIndexState>,
     query: String,
     top_k: Option<usize>,
     lambda: Option<f32>,
@@ -196,6 +236,10 @@ fn semantic_search(
     root_path: Option<String>,
     options: Option<MatchOptions>,
 ) -> Result<Vec<SemanticResult>, String> {
+    // 切り分け用計測: フロント側の「完了」表示までの時間とRust側計算時間の差分が
+    // 大きい場合、フロントの再描画/レンダリングがボトルネックであることの裏付けになる
+    let t_total = std::time::Instant::now();
+
     // 新しい検索エポックを開始（進行中の旧 browse/search をキャンセルする）
     let gen = search::next_generation();
 
@@ -239,9 +283,33 @@ fn semantic_search(
     };
 
     let mut cb: Box<dyn ExploreCallback> = if let Some(ch) = explore_channel {
-        Box::new(TauriCallback { app, channel: ch })
+        Box::new(TauriCallback::new(app, ch))
     } else {
         Box::new(astar::NoopCallback)
+    };
+
+    // AIサジェスト探索対象: クエリembeddingに近いフォルダ（folders.bin）をTop-Nで選び、
+    // Phase1ツリー外の兄弟/親ディレクトリとして A* に開放する。
+    // folders.bin 未構築（初回起動など）・クエリが空・埋め込みモデルロード中の場合は
+    // 空のまま続行する。
+    let extra_folders: Vec<std::path::PathBuf> = if query.trim().is_empty() {
+        vec![]
+    } else if let Some(embedder) = state.embedder() {
+        let query_emb = embedder.embed_one(&query);
+        let query_i8 = embedding::quantize_f32_to_i8(&query_emb);
+        state
+            .load_matrix()
+            .map(|matrix| {
+                matrix
+                    .nearest(&query_i8, EXTRA_FOLDER_TOP_N)
+                    .into_iter()
+                    .filter(|(_, score)| *score > EXTRA_FOLDER_MIN_SIMILARITY)
+                    .map(|(path, _)| std::path::PathBuf::from(path))
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        vec![]
     };
 
     // A* 探索は中央ペイン用の探索ログ(callback)を流すために実行する。
@@ -249,7 +317,11 @@ fn semantic_search(
     // （A* はファイル到達ノードのみ結果に積むためフォルダや一部ファイルが欠落するため）。
     let paths: Vec<std::path::PathBuf> =
         records.iter().map(|r| std::path::PathBuf::from(&r.path)).collect();
-    let astar_results = run_with_paths(&config, &paths, heuristic, scorer, cb.as_mut());
+    let candidate_count = paths.len();
+    let extra_folder_count = extra_folders.len();
+    let t_astar = std::time::Instant::now();
+    let astar_results = run_with_paths(&config, &paths, &extra_folders, heuristic, scorer, cb.as_mut());
+    let astar_ms = t_astar.elapsed().as_secs_f64() * 1000.0;
 
     // 左ペイン: 全候補をスコア付けし降順ソートして返す
     let phase1_paths: HashSet<String> = records.iter().map(|r| r.path.clone()).collect();
@@ -293,6 +365,11 @@ fn semantic_search(
             modified,
         })
     }));
+
+    eprintln!(
+        "[semantic_search] query={:?} candidates={} extra_folders={} astar={:.1}ms total={:.1}ms",
+        query, candidate_count, extra_folder_count, astar_ms, t_total.elapsed().as_secs_f64() * 1000.0,
+    );
 
     Ok(results)
 }
