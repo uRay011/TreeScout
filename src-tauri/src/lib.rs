@@ -129,6 +129,8 @@ pub struct SemanticResult {
     pub score: f32,
     /// Phase1候補（Everything結果）外から見つかったAIサジェストか
     pub is_suggestion: bool,
+    pub size: u64,
+    pub modified: String,
 }
 
 /// A* 探索ログイベント（Tauri emit で流す）
@@ -263,6 +265,8 @@ fn semantic_search(
                 is_dir: r.is_dir,
                 score,
                 is_suggestion: false,
+                size: r.size,
+                modified: search::format_mtime(r.mtime),
             }
         })
         .collect();
@@ -277,6 +281,7 @@ fn semantic_search(
         }
         let name = r.path.file_name()?.to_string_lossy().into_owned();
         let ext = r.path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+        let (size, modified) = fs_size_and_mtime(&r.path);
         Some(SemanticResult {
             path,
             name,
@@ -284,10 +289,41 @@ fn semantic_search(
             is_dir: false,
             score: r.score,
             is_suggestion: true,
+            size,
+            modified,
         })
     }));
 
     Ok(results)
+}
+
+/// AIサジェスト（folders.bin由来でEverythingレコードを持たない）のサイズ・更新日時を
+/// ファイルシステムから取得する。取得失敗時は 0 / 空文字を返す。
+fn fs_size_and_mtime(path: &std::path::Path) -> (u64, String) {
+    match std::fs::metadata(path) {
+        Ok(meta) => {
+            let modified = meta
+                .modified()
+                .ok()
+                .map(|t| search::format_mtime(systemtime_to_filetime(t)))
+                .unwrap_or_default();
+            (meta.len(), modified)
+        }
+        Err(_) => (0, String::new()),
+    }
+}
+
+/// `std::time::SystemTime`(Unix epoch) を Windows FILETIME(100ns, 1601-01-01起点) へ変換する。
+/// `format_mtime` に渡すための橋渡し
+fn systemtime_to_filetime(t: std::time::SystemTime) -> i64 {
+    const UNIX_EPOCH_AS_FILETIME: i64 = 11_644_473_600 * 10_000_000;
+    match t.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => UNIX_EPOCH_AS_FILETIME + d.as_secs() as i64 * 10_000_000 + d.subsec_nanos() as i64 / 100,
+        Err(e) => {
+            let d = e.duration();
+            UNIX_EPOCH_AS_FILETIME - d.as_secs() as i64 * 10_000_000 - d.subsec_nanos() as i64 / 100
+        }
+    }
 }
 
 // ── Everything 呼び出し（Windows only / 非 Windows はスタブ） ──

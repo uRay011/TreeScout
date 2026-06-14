@@ -83,6 +83,8 @@ pub struct SearchResult {
     pub folder: String,
     pub is_dir: bool,
     pub ext: String,
+    pub size: u64,
+    pub mtime: i64,
 }
 
 // Everything SDK エラーコード
@@ -217,7 +219,12 @@ pub fn search(query: &str, max: u32, opts: MatchOptions, gen: u64) -> Result<Vec
         return Err(SearchError::Cancelled);
     }
     unsafe {
-        (api.set_request_flags)(EVERYTHING_REQUEST_FILE_NAME | EVERYTHING_REQUEST_PATH);
+        (api.set_request_flags)(
+            EVERYTHING_REQUEST_FILE_NAME
+                | EVERYTHING_REQUEST_PATH
+                | EVERYTHING_REQUEST_SIZE
+                | EVERYTHING_REQUEST_DATE_MODIFIED,
+        );
         (api.set_max)(max);
         (api.set_match_case)(opts.case_sensitive as i32);
         (api.set_match_whole_word)(opts.whole_word as i32);
@@ -245,6 +252,16 @@ pub fn search(query: &str, max: u32, opts: MatchOptions, gen: u64) -> Result<Vec
             let dir = pcwstr_to_string((api.get_result_path_w)(i));
             let is_file = (api.is_file_result)(i) != 0;
 
+            let mut size: i64 = 0;
+            if (api.get_result_size)(i, &mut size as *mut i64) == 0 {
+                size = 0;
+            }
+
+            let mut mtime: i64 = 0;
+            if (api.get_result_date_modified)(i, &mut mtime as *mut i64) == 0 {
+                mtime = 0;
+            }
+
             let full_path = PathBuf::from(&dir).join(&name);
             let ext = if is_file {
                 PathBuf::from(&name)
@@ -260,6 +277,8 @@ pub fn search(query: &str, max: u32, opts: MatchOptions, gen: u64) -> Result<Vec
                 folder: dir,
                 is_dir: !is_file,
                 ext,
+                size: size.max(0) as u64,
+                mtime,
             });
         }
 

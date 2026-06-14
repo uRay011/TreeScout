@@ -30,6 +30,8 @@ mod stub {
         pub folder: String,
         pub is_dir: bool,
         pub ext: String,
+        pub size: u64,
+        pub mtime: i64,
     }
 
     /// `browse` 用の1行分データ（Windows実装と同形）。
