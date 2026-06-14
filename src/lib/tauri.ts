@@ -225,15 +225,11 @@ function normalizeDir(path: string): string {
 export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string, allDrives?: string[]): AstarColumn[] {
   let baseDepth: number | null = rootPath ? pathDepth(rootPath) : null;
 
-  const allByIdx = new Map<number, AstarEntry[]>();
-  const byParent = new Map<string, AstarEntry[]>();
-
-  const upsert = (arr: AstarEntry[], entry: AstarEntry) => {
-    // 同一パスの再探索（h_score更新）は既存行を上書きし、重複行を防ぐ
-    const existing = arr.findIndex(e => e.path === entry.path);
-    if (existing >= 0) arr[existing] = entry;
-    else arr.push(entry);
-  };
+  // Map<path, entry> でO(1)上書きする（配列+findIndexだとイベント数×グループサイズで
+  // O(n^2)になり、広域クエリ（数千イベント）で各バッチ再構築コストが爆発する）。
+  // Map.set は既存キーの挿入順位置を変えないため、配列+findIndex版と表示順は一致する。
+  const allByIdx = new Map<number, Map<string, AstarEntry>>();
+  const byParent = new Map<string, Map<string, AstarEntry>>();
 
   for (const ev of events) {
     const depth = pathDepth(ev.path);
@@ -245,12 +241,14 @@ export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string
       ? { path: ev.path, name: basename(ev.path), ext: extname(ev.path), is_dir: false, score: ev.score, kind: "found" }
       : { path: ev.path, name: basename(ev.path), ext: "", is_dir: true, score: ev.h_score, kind: ev.type === "open_dir" ? "opened" : "skipped" };
 
-    if (!allByIdx.has(idx)) allByIdx.set(idx, []);
-    upsert(allByIdx.get(idx)!, entry);
+    let idxMap = allByIdx.get(idx);
+    if (!idxMap) { idxMap = new Map(); allByIdx.set(idx, idxMap); }
+    idxMap.set(entry.path, entry);
 
-    const parentKey = `${idx} ${normalizeDir(dirname(ev.path))}`;
-    if (!byParent.has(parentKey)) byParent.set(parentKey, []);
-    upsert(byParent.get(parentKey)!, entry);
+    const parentKey = `${idx} ${normalizeDir(dirname(ev.path))}`;
+    let parentMap = byParent.get(parentKey);
+    if (!parentMap) { parentMap = new Map(); byParent.set(parentKey, parentMap); }
+    parentMap.set(entry.path, entry);
   }
 
   const columns: AstarColumn[] = [];
@@ -258,12 +256,12 @@ export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string
     columns.push({
       id: "col-0",
       label: basename(rootPath) || rootPath,
-      entries: byParent.get(`0 ${normalizeDir(rootPath)}`) ?? [],
+      entries: Array.from(byParent.get(`0 ${normalizeDir(rootPath)}`)?.values() ?? []),
       activeEntryPath: null,
       dirPath: rootPath,
     });
   } else if (allByIdx.size > 0 || (allDrives && allDrives.length > 0)) {
-    const entries = [...(allByIdx.get(0) ?? [])];
+    const entries = Array.from(allByIdx.get(0)?.values() ?? []);
     if (allDrives && allDrives.length > 0) {
       const present = new Set(entries.map(e => basename(e.path).toUpperCase()));
       for (const drive of allDrives) {
@@ -295,7 +293,7 @@ export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string
     columns.push({
       id: `col-${idx + 1}`,
       label: formatDirLabel(dirPath),
-      entries: byParent.get(`${idx + 1} ${normalizeDir(dirPath)}`) ?? [],
+      entries: Array.from(byParent.get(`${idx + 1} ${normalizeDir(dirPath)}`)?.values() ?? []),
       activeEntryPath: null,
       dirPath,
     });
@@ -320,6 +318,15 @@ export function buildColumnsFromEvents(events: ExploreEvent[], rootPath?: string
  * 何もしないとそのフォルダの他の中身（例: Eドライブ直下のDocument以外のフォルダ）が
  * 一切表示されない。検索完了後に1回だけ呼び、全件表示に補完する。
  */
+/**
+ * 1カラムに補完するフィラー（A*非到達＝スコア0の非ヒット）の上限。
+ * 巨大ディレクトリ（数千件）を丸ごと流し込むとカラムUIが数千DOMノードを抱え、
+ * レンダリングとメモリを圧迫する。マッチ済みエントリ（col.entries）は温存し、
+ * 非ヒットの埋め草だけをこの件数で打ち切る。全件は左ペイン（仮想化済み）で参照できる。
+ * listDirectory はフォルダ先頭・名前昇順で返すため、先頭から採るとフォルダは欠落しない。
+ */
+const MAX_FILLER_PER_COLUMN = 100;
+
 export async function fillMissingEntries(columns: AstarColumn[], query?: string): Promise<AstarColumn[]> {
   return Promise.all(
     columns.map(async (col) => {
@@ -329,6 +336,7 @@ export async function fillMissingEntries(columns: AstarColumn[], query?: string)
         const present = new Set(col.entries.map(e => e.path));
         const extra: AstarEntry[] = children
           .filter(c => !present.has(c.path))
+          .slice(0, MAX_FILLER_PER_COLUMN)
           .map(c => ({ path: c.path, name: c.name, ext: c.ext, is_dir: c.is_dir, score: 0, kind: "skipped" }));
         if (extra.length === 0) return col;
         const entries = [...col.entries, ...extra];
@@ -345,8 +353,8 @@ export interface SemanticSearchOptions {
   topK?: number;
   lambda?: number;
   mu?: number;
-  /** 探索ログを受け取るコールバック。省略すると無効 */
-  onExplore?: (event: ExploreEvent) => void;
+  /** 探索ログを受け取るコールバック（Rust側で~16msごとにまとめたバッチ単位）。省略すると無効 */
+  onExplore?: (events: ExploreEvent[]) => void;
   /** 探索のルートフォルダ（Everything の path: フィルタに渡す） */
   rootPath?: string;
   /** 検索メニューのマッチオプション（大文字小文字の区別 / 単語に完全一致 / フォルダ名にマッチ） */
@@ -367,7 +375,7 @@ export async function semanticSearch(
   const channel = onExplore ? `treescout://explore/${Date.now()}` : undefined;
 
   if (channel && onExplore) {
-    unlisten = await listen<ExploreEvent>(channel, (ev) => onExplore(ev.payload));
+    unlisten = await listen<ExploreEvent[]>(channel, (ev) => onExplore(ev.payload));
   }
 
   try {
@@ -396,3 +404,4 @@ export type PreviewResult =
 export async function getPreview(path: string): Promise<PreviewResult> {
   return invoke<PreviewResult>("get_preview", { path });
 }
+

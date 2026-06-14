@@ -20,6 +20,7 @@ import {
   basename,
   listDirectory,
   listDrives,
+  indexFolders,
   BrowseSort,
   BrowseSortCol,
   MatchOptions,
@@ -156,6 +157,11 @@ function StatusLogEntry({ entry }: { entry: StatusLogData | null }) {
 
 export default function App() {
   const [query,         setQuery]         = useState("");
+  // handleColumnEntrySelect を query 非依存の安定参照に保つための ref。
+  // query を直接依存にすると毎打鍵でコールバックが作り直され、memo化した
+  // ColumnPanel/HeatmapItem が全カラム再調整されて入力反映が遅延する。
+  const queryRef = useRef(query);
+  queryRef.current = query;
   const [results,       setResults]       = useState<SearchResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [isLoading,     setIsLoading]     = useState(false);
@@ -345,27 +351,64 @@ export default function App() {
     setCounts({ o: 0, s: 0, f: 0 });
     const counts = { o: 0, s: 0, f: 0 };
     let phaseAdvanced = false;
+
+    // カラム再構築のスロットリング: Rust側は~16msごとにバッチを送るが、
+    // buildColumnsFromEvents は累積イベント全体からの再構築でありバッチごとに
+    // 呼ぶとレンダーが詰まり、検索完了後もメインスレッドのバックログで
+    // 入力反映が10秒以上遅れる原因になる。再構築は~100msに1回へ間引き、
+    // 間引かれた最後のバッチも遅延実行で必ず反映する
+    const COLUMNS_REBUILD_INTERVAL_MS = 100;
+    let lastColumnsRebuildAt = 0;
+    let columnsRebuildTimer: ReturnType<typeof setTimeout> | null = null;
+    const rebuildColumns = () => {
+      lastColumnsRebuildAt = performance.now();
+      setColumns(buildColumnsFromEvents(exploreEventsRef.current, rootPath, allDrives));
+    };
+    const scheduleColumnsRebuild = () => {
+      const elapsed = performance.now() - lastColumnsRebuildAt;
+      if (elapsed >= COLUMNS_REBUILD_INTERVAL_MS) {
+        if (columnsRebuildTimer !== null) {
+          clearTimeout(columnsRebuildTimer);
+          columnsRebuildTimer = null;
+        }
+        rebuildColumns();
+      } else if (columnsRebuildTimer === null) {
+        columnsRebuildTimer = setTimeout(() => {
+          columnsRebuildTimer = null;
+          if (seq === searchSeqRef.current) rebuildColumns();
+        }, COLUMNS_REBUILD_INTERVAL_MS - elapsed);
+      }
+    };
+
     try {
       const items = await semanticSearch(query, {
         // Everything候補上限(1000件)に合わせ、A*の上位K件絞り込みで結果が削られないようにする
         topK: 1000,
         rootPath,
         matchOptions: searchOptions,
-        onExplore: (ev) => {
+        // Rust側で~16msごとにまとめたバッチを受け取る
+        onExplore: (evs) => {
           if (seq !== searchSeqRef.current) return; // 古い実行からの遅延イベントは無視（カラム重複防止）
-          exploreEventsRef.current.push(ev);
-          setColumns(buildColumnsFromEvents(exploreEventsRef.current, rootPath, allDrives));
+          if (evs.length === 0) return;
+          exploreEventsRef.current.push(...evs);
           if (!phaseAdvanced) {
             phaseAdvanced = true;
             setPhase("Phase 2: A*探索…");
           }
-          if (ev.type === "open_dir") counts.o++;
-          else if (ev.type === "skip_dir") counts.s++;
-          else counts.f++;
+          for (const ev of evs) {
+            if (ev.type === "open_dir") counts.o++;
+            else if (ev.type === "skip_dir") counts.s++;
+            else counts.f++;
+          }
+          scheduleColumnsRebuild();
           setCounts({ ...counts });
-          setLogEntry(exploreLogEntry(ev, ++logKeyRef.current));
+          setLogEntry(exploreLogEntry(evs[evs.length - 1], ++logKeyRef.current));
         },
       });
+      if (columnsRebuildTimer !== null) {
+        clearTimeout(columnsRebuildTimer);
+        columnsRebuildTimer = null;
+      }
       if (seq !== searchSeqRef.current) return;
 
       // 探索ログには「ヒットへの経路」しか登場しないため、各カラムの実フォルダを
@@ -393,6 +436,10 @@ export default function App() {
       stopElapsedTimer(performance.now() - t0);
       setPhase(`完了 — ${normalized.length}件 / ${Math.round(performance.now() - t0)}ms`);
     } catch {
+      if (columnsRebuildTimer !== null) {
+        clearTimeout(columnsRebuildTimer);
+        columnsRebuildTimer = null;
+      }
       if (seq !== searchSeqRef.current) return;
       setResults([]);
       stopElapsedTimer(performance.now() - t0);
@@ -413,6 +460,21 @@ export default function App() {
   // スコープ解除（ドライブ全体検索に戻す）
   const handleClearRoot = useCallback(() => {
     setRootPath("");
+  }, []);
+
+  // フォルダ embedding 事前インデックス（folders.bin）の再構築
+  // 動作確認用の暫定UI。対象フォルダを選び index_folders_command を実行する。
+  const handleReindexFolders = useCallback(async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected !== "string") return;
+    try {
+      const result = await indexFolders(selected);
+      window.alert(
+        `インデックス完了\n更新: ${result.updated}\nスキップ: ${result.skipped}\n走査: ${result.scanned}\n削除: ${result.removed}\n総件数: ${result.matrix_len}`
+      );
+    } catch (e) {
+      window.alert(`インデックス失敗: ${e}`);
+    }
   }, []);
 
   // 初回表示、ルートフォルダの確定・解除（全体に戻す）時は即座に一覧を取得する。
@@ -448,8 +510,8 @@ export default function App() {
     }
 
     try {
-      // query を渡し、展開した子にもヒート色用のスコアを付与する
-      const children = await listDirectory(entry.path, query);
+      // query を渡し、展開した子にもヒート色用のスコアを付与する（最新クエリは ref から読む）
+      const children = await listDirectory(entry.path, queryRef.current);
       const nextColumn: AstarColumn = {
         id: `col-${colIndex + 1}-${entry.path}`,
         label: entry.name,
@@ -467,7 +529,7 @@ export default function App() {
     } catch {
       setColumns(cols => cols.slice(0, colIndex + 1));
     }
-  }, [query]);
+  }, []);
 
   // 結果リスト: 行選択 → 最終カラムをアクティブ化 + プレビュー更新
   const handleResultSelect = useCallback((index: number) => {
@@ -748,6 +810,7 @@ export default function App() {
   // ファイル/編集/検索メニューの項目定義（タイトルバー / ハンバーガードロップダウン共通）
   const menuPopupItems: Record<string, MenuItemDef[]> = {
     "ファイル": [
+      { type: "action", label: "フォルダを再インデックス...", onSelect: handleReindexFolders },
       { type: "action", label: "終了", shortcut: "Ctrl+Q", onSelect: () => getCurrentWindow().close() },
     ],
     "編集": [
