@@ -14,7 +14,7 @@ export interface BrowseWindow {
   /** [lo, hi] の範囲を非同期で取得・キャッシュする（デバウンス済み） */
   ensureRange: (lo: number, hi: number) => void;
   /** クエリ・ソートでバックエンドに全件を常駐させ、総件数を取得して返す */
-  runBrowse: (query: string, sort: BrowseSort, options?: MatchOptions, onProgress?: (p: BrowseProgress) => void) => Promise<number>;
+  runBrowse: (query: string, sort: BrowseSort, options?: MatchOptions, onProgress?: (p: BrowseProgress) => void) => Promise<{ total: number; debug?: string }>;
 }
 
 /**
@@ -112,7 +112,7 @@ export function useBrowseWindow(): BrowseWindow {
     }, ENSURE_DEBOUNCE_MS);
   }, [flushEnsure]);
 
-  const runBrowse = useCallback(async (query: string, sort: BrowseSort, options?: MatchOptions, onProgress?: (p: BrowseProgress) => void): Promise<number> => {
+  const runBrowse = useCallback(async (query: string, sort: BrowseSort, options?: MatchOptions, onProgress?: (p: BrowseProgress) => void): Promise<{ total: number; debug?: string }> => {
     const req = ++reqRef.current;
 
     // 進行中のデバウンス・キャッシュをリセット
@@ -133,13 +133,18 @@ export function useBrowseWindow(): BrowseWindow {
         setTotal(0);
         tick();
       }
-      return 0;
+      return { total: 0 };
     }
 
-    const { total: t, generation } = res;
+    const { total: t, generation, debug } = res;
+
+    // この呼び出しが最新のrunBrowseでなければ（後発のrunBrowseが既に開始済み）、
+    // 遅延到着した古い結果（cancelled時のtotal:0等）で最新の状態を上書きしない
+    if (req !== reqRef.current) return { total: t, debug };
+
     // 最大世代のみ採用。並行 browse で総件数とスナップショットの世代がズレるのを防ぐ
     // （世代は SEARCH_GEN で単調増加するため、後発 browse は必ず大きい generation を持つ）
-    if (generation <= genRef.current) return t;
+    if (generation <= genRef.current) return { total: t, debug };
     genRef.current = generation;
 
     cacheRef.current.clear();
@@ -160,7 +165,7 @@ export function useBrowseWindow(): BrowseWindow {
     }
 
     if (generation === genRef.current) tick();
-    return t;
+    return { total: t, debug };
   }, [tick]);
 
   return { total, getRow, ensureRange, runBrowse };

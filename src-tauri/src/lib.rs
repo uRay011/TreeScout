@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -9,7 +10,7 @@ use pipeline::{run_with_paths, scoring};
 use search::{MatchOptions, SearchError, SearchResult as EvResult};
 
 mod browse_session;
-use browse_session::{browse, fetch_window, BrowseState};
+use browse_session::{browse, fetch_window, BrowseSnapshot, BrowseState};
 
 mod folder_index;
 use folder_index::{index_folders_command, FolderIndexState};
@@ -97,6 +98,14 @@ fn list_directory(path: String, query: Option<String>) -> Result<Vec<DirEntryRes
     Ok(entries)
 }
 
+// ── Phase 4: 「PC」階層のドライブ一覧 ─────────────────────────
+//
+// 左ペイン最上位カラムに、検索結果が0件のドライブもグレー表示するための一覧。
+#[tauri::command]
+fn list_drives() -> Vec<String> {
+    search::list_drives()
+}
+
 // ── Phase 4: ファイルプレビュー ──────────────────────────────
 //
 // 検索パイプラインとは独立した経路。アイテム選択時にのみ呼ばれるため
@@ -118,6 +127,10 @@ pub struct SemanticResult {
     pub ext: String,
     pub is_dir: bool,
     pub score: f32,
+    /// Phase1候補（Everything結果）外から見つかったAIサジェストか
+    pub is_suggestion: bool,
+    pub size: u64,
+    pub modified: String,
 }
 
 /// A* 探索ログイベント（Tauri emit で流す）
@@ -205,6 +218,7 @@ fn semantic_search(
         top_k: top_k.unwrap_or(20),
         lambda: lambda.unwrap_or(0.1),
         mu: mu.unwrap_or(0.001),
+        ..Default::default()
     };
 
     // 段階的スコアラー（埋め込みは Phase 4 で置換予定）。
@@ -235,9 +249,11 @@ fn semantic_search(
     // （A* はファイル到達ノードのみ結果に積むためフォルダや一部ファイルが欠落するため）。
     let paths: Vec<std::path::PathBuf> =
         records.iter().map(|r| std::path::PathBuf::from(&r.path)).collect();
-    let _ = run_with_paths(&config, &paths, heuristic, scorer, cb.as_mut());
+    let astar_results = run_with_paths(&config, &paths, heuristic, scorer, cb.as_mut());
 
     // 左ペイン: 全候補をスコア付けし降順ソートして返す
+    let phase1_paths: HashSet<String> = records.iter().map(|r| r.path.clone()).collect();
+
     let mut results: Vec<SemanticResult> = records
         .into_iter()
         .map(|r| {
@@ -248,12 +264,66 @@ fn semantic_search(
                 ext: r.ext,
                 is_dir: r.is_dir,
                 score,
+                is_suggestion: false,
+                size: r.size,
+                modified: search::format_mtime(r.mtime),
             }
         })
         .collect();
     results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
+    // AIサジェスト: Phase1候補外（folders.bin由来の探索）から見つかった高スコアファイルを
+    // Phase1パスとdedupした上で末尾に追加する
+    results.extend(astar_results.into_iter().filter(|r| !r.in_phase1).filter_map(|r| {
+        let path = r.path.to_string_lossy().into_owned();
+        if phase1_paths.contains(&path) {
+            return None;
+        }
+        let name = r.path.file_name()?.to_string_lossy().into_owned();
+        let ext = r.path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+        let (size, modified) = fs_size_and_mtime(&r.path);
+        Some(SemanticResult {
+            path,
+            name,
+            ext,
+            is_dir: false,
+            score: r.score,
+            is_suggestion: true,
+            size,
+            modified,
+        })
+    }));
+
     Ok(results)
+}
+
+/// AIサジェスト（folders.bin由来でEverythingレコードを持たない）のサイズ・更新日時を
+/// ファイルシステムから取得する。取得失敗時は 0 / 空文字を返す。
+fn fs_size_and_mtime(path: &std::path::Path) -> (u64, String) {
+    match std::fs::metadata(path) {
+        Ok(meta) => {
+            let modified = meta
+                .modified()
+                .ok()
+                .map(|t| search::format_mtime(systemtime_to_filetime(t)))
+                .unwrap_or_default();
+            (meta.len(), modified)
+        }
+        Err(_) => (0, String::new()),
+    }
+}
+
+/// `std::time::SystemTime`(Unix epoch) を Windows FILETIME(100ns, 1601-01-01起点) へ変換する。
+/// `format_mtime` に渡すための橋渡し
+fn systemtime_to_filetime(t: std::time::SystemTime) -> i64 {
+    const UNIX_EPOCH_AS_FILETIME: i64 = 11_644_473_600 * 10_000_000;
+    match t.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => UNIX_EPOCH_AS_FILETIME + d.as_secs() as i64 * 10_000_000 + d.subsec_nanos() as i64 / 100,
+        Err(e) => {
+            let d = e.duration();
+            UNIX_EPOCH_AS_FILETIME - d.as_secs() as i64 * 10_000_000 - d.subsec_nanos() as i64 / 100
+        }
+    }
 }
 
 // ── Everything 呼び出し（Windows only / 非 Windows はスタブ） ──
@@ -280,12 +350,13 @@ pub fn run() {
         .setup(|app| {
             let state = FolderIndexState::init(app.handle()).map_err(std::io::Error::other)?;
             app.manage(state);
-            app.manage(BrowseState(Mutex::new((0, Vec::new()))));
+            app.manage(BrowseState(Mutex::new(BrowseSnapshot::default())));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             search_files,
             semantic_search,
+            list_drives,
             get_preview,
             index_folders_command,
             list_directory,

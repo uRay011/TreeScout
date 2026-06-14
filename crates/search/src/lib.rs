@@ -3,7 +3,7 @@ mod everything;
 
 #[cfg(windows)]
 pub use everything::{
-    browse, current_generation, format_mtime, next_generation, search, BrowseRow, MatchOptions, SearchError, SearchResult,
+    browse, current_generation, diag, format_mtime, list_drives, next_generation, search, sort_order, BrowseRow, MatchOptions, SearchError, SearchResult,
     EVERYTHING_SORT_DATE_MODIFIED_ASCENDING, EVERYTHING_SORT_DATE_MODIFIED_DESCENDING,
     EVERYTHING_SORT_NAME_ASCENDING, EVERYTHING_SORT_NAME_DESCENDING,
     EVERYTHING_SORT_PATH_ASCENDING, EVERYTHING_SORT_PATH_DESCENDING,
@@ -30,6 +30,8 @@ mod stub {
         pub folder: String,
         pub is_dir: bool,
         pub ext: String,
+        pub size: u64,
+        pub mtime: i64,
     }
 
     /// `browse` 用の1行分データ（Windows実装と同形）。
@@ -42,7 +44,7 @@ mod stub {
     }
 
     /// Everything のマッチングオプション（Windows実装と同形）。
-    #[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
     #[serde(default, rename_all = "camelCase")]
     pub struct MatchOptions {
         pub case_sensitive: bool,
@@ -64,13 +66,24 @@ mod stub {
 
     pub fn browse<F: FnMut(usize)>(
         _query: &str,
-        _sort: u32,
         _max: u32,
         _opts: MatchOptions,
         _gen: u64,
         _on_progress: F,
     ) -> Result<Vec<BrowseRow>, SearchError> {
         Ok(vec![])
+    }
+
+    pub fn sort_order(_rows: &[BrowseRow], _sort: u32) -> Vec<u32> {
+        Vec::new()
+    }
+
+    pub fn diag(_query: &str, _opts: MatchOptions) -> String {
+        "non-windows stub".to_string()
+    }
+
+    pub fn list_drives() -> Vec<String> {
+        Vec::new()
     }
 
     pub fn format_mtime(_ft: i64) -> String {
@@ -90,7 +103,7 @@ mod stub {
 
 #[cfg(not(windows))]
 pub use stub::{
-    browse, current_generation, format_mtime, next_generation, search, BrowseRow, MatchOptions, SearchError, SearchResult,
+    browse, current_generation, diag, format_mtime, list_drives, next_generation, search, sort_order, BrowseRow, MatchOptions, SearchError, SearchResult,
     EVERYTHING_SORT_DATE_MODIFIED_ASCENDING, EVERYTHING_SORT_DATE_MODIFIED_DESCENDING,
     EVERYTHING_SORT_NAME_ASCENDING, EVERYTHING_SORT_NAME_DESCENDING,
     EVERYTHING_SORT_PATH_ASCENDING, EVERYTHING_SORT_PATH_DESCENDING,

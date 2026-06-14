@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, observeElementOffset, elementScroll, type Virtualizer } from "@tanstack/react-virtual";
 import { Search } from "lucide-react";
 import { SearchResult } from "../../lib/tauri";
 import { ViewMode } from "./ViewModePopup";
@@ -11,16 +11,47 @@ const ROW_HEIGHT: Record<ViewMode, number> = {
   detail: 44,
 };
 
+// WebView2(Chromium)のCSS要素高さ上限(約33.5Mpx)対策。
+// 170万件×行高がこれを超えるとheightがブラウザにsilently clampされ、
+// scrollHeightがそれ以上拡張されず末尾までスクロールできなくなる。
+// この値未満にコンテナ高さを抑え、ネイティブscrollTopと仮想化の論理座標を
+// ratio倍でリマッピングする（observeElementOffset/scrollToFn参照）。
+const SAFE_HEIGHT = 8_000_000;
+
+type ObserveOffsetCallback = (offset: number, isScrolling: boolean) => void;
+
 type SortCol = "score" | "name" | "folder" | "size" | "date";
 
+// 拡張子 → バッジ着色クラス（ColumnView側のアイコン配色と揃える、design.md参照）
 const EXT_CLASS: Record<string, string> = {
-  tsx:  "ext-tsx",
-  ts:   "ext-ts",
-  css:  "ext-css",
-  md:   "ext-md",
-  json: "ext-json",
-  rs:   "ext-rs",
+  ts: "ext-ts", tsx: "ext-tsx",
+  js: "ext-js", jsx: "ext-js", mjs: "ext-js", cjs: "ext-js",
+  css: "ext-css",
+  scss: "ext-scss", sass: "ext-scss", less: "ext-scss",
+  html: "ext-html", htm: "ext-html",
+  json: "ext-json", json5: "ext-json", jsonc: "ext-json", jsonl: "ext-json", ndjson: "ext-json",
+  yaml: "ext-yaml", yml: "ext-yaml",
+  rs: "ext-rs",
   toml: "ext-toml",
+  sh: "ext-sh", bash: "ext-sh", zsh: "ext-sh", ps1: "ext-sh",
+  md: "ext-md", markdown: "ext-md",
+  txt: "ext-txt",
+  pdf: "ext-pdf",
+  doc: "ext-docx", docx: "ext-docx", rtf: "ext-docx",
+  xls: "ext-xlsx", xlsx: "ext-xlsx", xlsm: "ext-xlsx", csv: "ext-xlsx",
+  ppt: "ext-ppt", pptx: "ext-ppt",
+  png: "ext-image", jpg: "ext-image", jpeg: "ext-image", gif: "ext-image",
+  webp: "ext-image", svg: "ext-image", bmp: "ext-image", ico: "ext-image",
+  py: "ext-py", pyw: "ext-py", pkl: "ext-py", pickle: "ext-py",
+  go: "ext-go",
+  exe: "ext-exe", dll: "ext-exe", msi: "ext-exe",
+  zip: "ext-zip", rar: "ext-zip", "7z": "ext-zip", tar: "ext-zip", gz: "ext-zip", bz2: "ext-zip",
+  c: "ext-cpp", h: "ext-cpp", cpp: "ext-cpp", cc: "ext-cpp", cxx: "ext-cpp", hpp: "ext-cpp", hh: "ext-cpp", hxx: "ext-cpp",
+  cs: "ext-csharp",
+  java: "ext-java",
+  dart: "ext-dart",
+  mp4: "ext-video", avi: "ext-video", mov: "ext-video", mkv: "ext-video", wmv: "ext-video", webm: "ext-video", flv: "ext-video", m4v: "ext-video",
+  mp3: "ext-audio", wav: "ext-audio", flac: "ext-audio", aac: "ext-audio", ogg: "ext-audio", m4a: "ext-audio", wma: "ext-audio",
 };
 
 function extClass(ext: string) {
@@ -166,15 +197,58 @@ export function ResultList({ results, windowSource, sort, onSortChange, selected
 
   const itemCount = isWindowMode ? windowSource!.total : sorted.length;
 
+  // ネイティブscrollTopの可動範囲 [0, containerHeight] と、仮想化の論理座標
+  // [0, realTotal] をratio倍でリマッピングする（SAFE_HEIGHT超のときのみ縮小）
+  const rowHeight = ROW_HEIGHT[viewMode];
+  const realTotal = itemCount * rowHeight;
+  const ratio = Math.max(1, realTotal / SAFE_HEIGHT);
+  const containerHeight = realTotal / ratio;
+
+  // observeElementOffset/scrollToFnはscrollElement確定時に一度だけ登録されるため、
+  // クロージャ内では最新のratio/realTotalをrefから読む
+  const ratioRef = useRef(ratio);
+  ratioRef.current = ratio;
+  const realTotalRef = useRef(realTotal);
+  realTotalRef.current = realTotal;
+
+  const customObserveElementOffset = useMemo(
+    () => (instance: Virtualizer<HTMLUListElement, Element>, cb: ObserveOffsetCallback) =>
+      observeElementOffset(instance, (offset, isScrolling) => {
+        const r = ratioRef.current;
+        const element = instance.scrollElement;
+        if (r > 1 && element) {
+          // scrollTop*ratioでは末尾でrealTotal-viewport*ratio止まりとなり、
+          // 末尾付近の行が仮想化範囲に入らず常に描画されない隙間ができる。
+          // ネイティブscrollTopが上限に達したら論理offsetをrealTotal-viewportに
+          // 固定し、最終行まで仮想化範囲に含める。
+          const maxScrollTop = element.scrollHeight - element.clientHeight;
+          if (maxScrollTop > 0 && offset >= maxScrollTop - 1) {
+            cb(realTotalRef.current - element.clientHeight, isScrolling);
+            return;
+          }
+        }
+        cb(offset * r, isScrolling);
+      }),
+    []
+  );
+
+  const customScrollToFn = useMemo(
+    () => (offset: number, options: { adjustments?: number; behavior?: ScrollBehavior }, instance: Virtualizer<HTMLUListElement, Element>) =>
+      elementScroll(offset / ratioRef.current, options, instance),
+    []
+  );
+
   // 大量件数（全体検索時は数十万件規模）でもDOMノード数を一定に保つための仮想スクロール
   const rowVirtualizer = useVirtualizer({
     count: itemCount,
     getScrollElement: () => listRef.current,
-    estimateSize: () => ROW_HEIGHT[viewMode],
+    estimateSize: () => rowHeight,
     overscan: 10,
-    getItemKey: (index) => isWindowMode
-      ? (windowSource!.getRow(index)?.path ?? index)
-      : sorted[index].path,
+    observeElementOffset: customObserveElementOffset,
+    scrollToFn: customScrollToFn,
+    // 窓モードは未取得→取得済みでpathが変わるとキーが入れ替わり、
+    // measurementsCache/elementsCacheの不整合(スケルトン残留)を招くためindex固定
+    getItemKey: (index) => isWindowMode ? index : sorted[index].path,
   });
 
   // キーボード操作で選択行が変わったら表示範囲外でもスクロール追従させる
@@ -195,7 +269,7 @@ export function ResultList({ results, windowSource, sort, onSortChange, selected
     <div className={`left-pane${isMd ? " w-md" : ""}${isLg ? " w-lg" : ""}${viewClass}`} id="leftPane" ref={paneRef}>
       {/* ── ヘッダー ── */}
       <div className="list-header" role="row">
-        {hasScore && <ColHeader col="score"  label="一致"     className="col-h-score" />}
+        {hasScore && <ColHeader col="score"  label="スコア"   className="col-h-score" />}
         <ColHeader col="name"   label="名前"     className="col-h-name" />
         <ColHeader col="folder" label="フォルダ" className="col-h-folder" />
         <ColHeader col="size"   label="サイズ"   className="col-h-size" />
@@ -225,76 +299,92 @@ export function ResultList({ results, windowSource, sort, onSortChange, selected
           </li>
         )}
         {itemCount > 0 && (
-          <div className="file-list-virtual" style={{ height: rowVirtualizer.getTotalSize() }}>
-            {virtualItems.map((vRow) => {
-              const i = vRow.index;
-              const r = isWindowMode ? windowSource!.getRow(i) : sorted[i];
+          <div className="file-list-virtual" style={{ height: containerHeight }}>
+            {(() => {
+              // 仮想化の論理座標(item.start)を現在のscrollTop基準の相対座標に変換する。
+              // ratio===1のときは renderTop === item.start に退化する。
+              // ネイティブscrollTop上限ではvirtualOffsetがrealTotal-viewportに
+              // 補正される（customObserveElementOffset）ため、scrollTop側も
+              // ネイティブ上限でクランプして表示位置のズレを防ぐ
+              const virtualOffset = rowVirtualizer.scrollOffset ?? 0;
+              const viewportHeight = rowVirtualizer.scrollRect?.height ?? 0;
+              // containerHeight < viewportHeight（結果件数が少ない）の場合、上限が負になり
+              // 全行がtranslateYで画面上方向に押し出されて空欄に見えるため、下限0でクランプする
+              const scrollTop = Math.min(virtualOffset / ratio, Math.max(0, containerHeight - viewportHeight));
+              return virtualItems.map((vRow) => {
+                const i = vRow.index;
+                const r = isWindowMode ? windowSource!.getRow(i) : sorted[i];
+                const renderTop = scrollTop + (vRow.start - virtualOffset);
 
-              if (!r) {
-                // 窓モードで未取得の行はスケルトンを表示する（仮想化のtransformを適用）
-                const w = SKELETON_WIDTHS[i % SKELETON_WIDTHS.length];
+                if (!r) {
+                  // 窓モードで未取得の行はスケルトンを表示する（仮想化のtransformを適用）
+                  const w = SKELETON_WIDTHS[i % SKELETON_WIDTHS.length];
+                  return (
+                    <li
+                      className="sk-row"
+                      key={i}
+                      aria-hidden
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        height: vRow.size,
+                        transform: `translateY(${renderTop}px)`,
+                      }}
+                    >
+                      <span className="sk-block sk-badge" />
+                      <span className="sk-block sk-line" style={{ flex: `0 0 ${w}%` }} />
+                    </li>
+                  );
+                }
+
+                const score = r.score ?? 0;
+                const isSelected = selectedIndex === i || (selectedIndices?.has(i) ?? false);
                 return (
                   <li
-                    className="sk-row"
-                    key={i}
-                    aria-hidden
+                    key={r.path}
+                    role="option"
+                    aria-selected={isSelected}
+                    className={`file-row${isSelected ? " selected" : ""}`}
                     style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
+                      ...(hasScore ? { "--heat-bg": heatBg(score) } as React.CSSProperties : undefined),
                       height: vRow.size,
-                      transform: `translateY(${vRow.start}px)`,
+                      transform: `translateY(${renderTop}px)`,
                     }}
+                    onClick={() => onSelect(i)}
+                    onDoubleClick={() => onOpen(r)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") onOpen(r);
+                    }}
+                    tabIndex={selectedIndex === i ? 0 : -1}
                   >
-                    <span className="sk-block sk-badge" />
-                    <span className="sk-block sk-line" style={{ flex: `0 0 ${w}%` }} />
+                    {hasScore && <span className="row-heatbar" aria-hidden />}
+                    {hasScore && (
+                      <div className="row-score">
+                        <span className="row-score-num">{score.toFixed(2)}</span>
+                        <div className="row-score-bar">
+                          <div className="row-score-fill" style={{ transform: `scaleX(${score})` }} />
+                        </div>
+                      </div>
+                    )}
+                    <div className="row-main">
+                      <div className="row-name">
+                        <span className={`ext-badge ${extClass(r.ext)}`}>{r.ext.toUpperCase().slice(0, 4)}</span>
+                        {r.is_suggestion && (
+                          <span className="ai-badge" title="AIサジェスト: Everythingの絞り込み候補外からA*が発見">AI</span>
+                        )}
+                        <span className="row-file">{r.name}</span>
+                      </div>
+                      <div className="row-folder">{r.folder}</div>
+                    </div>
+                    <div className="row-folder-col">{r.folder}</div>
+                    <div className="row-size">{r.is_dir ? "" : formatSize(r.size)}</div>
+                    <div className="row-date">{r.modified}</div>
                   </li>
                 );
-              }
-
-              const score = r.score ?? 0;
-              const isSelected = selectedIndex === i || (selectedIndices?.has(i) ?? false);
-              return (
-                <li
-                  key={r.path}
-                  role="option"
-                  aria-selected={isSelected}
-                  className={`file-row${isSelected ? " selected" : ""}`}
-                  style={{
-                    ...(hasScore ? { "--heat-bg": heatBg(score) } as React.CSSProperties : undefined),
-                    height: vRow.size,
-                    transform: `translateY(${vRow.start}px)`,
-                  }}
-                  onClick={() => onSelect(i)}
-                  onDoubleClick={() => onOpen(r)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") onOpen(r);
-                  }}
-                  tabIndex={selectedIndex === i ? 0 : -1}
-                >
-                  {hasScore && <span className="row-heatbar" aria-hidden />}
-                  {hasScore && (
-                    <div className="row-score">
-                      <span className="row-score-num">{score.toFixed(2)}</span>
-                      <div className="row-score-bar">
-                        <div className="row-score-fill" style={{ transform: `scaleX(${score})` }} />
-                      </div>
-                    </div>
-                  )}
-                  <div className="row-main">
-                    <div className="row-name">
-                      <span className={`ext-badge ${extClass(r.ext)}`}>{r.ext.toUpperCase().slice(0, 4)}</span>
-                      <span className="row-file">{r.name}</span>
-                    </div>
-                    <div className="row-folder">{r.folder}</div>
-                  </div>
-                  <div className="row-folder-col">{r.folder}</div>
-                  <div className="row-size">{formatSize(r.size)}</div>
-                  <div className="row-date">{r.modified}</div>
-                </li>
-              );
-            })}
+              });
+            })()}
           </div>
         )}
       </ul>

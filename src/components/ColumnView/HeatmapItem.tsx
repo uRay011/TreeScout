@@ -1,29 +1,88 @@
+import type { ReactElement } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, ChevronRight } from "lucide-react";
 import { AstarEntry } from "../../lib/tauri";
 import { heatmapStyle, scoreTier, TIER_LABELS } from "../../lib/heatmap";
 
-// フォルダSVG
-function IconFolder({ color }: { color: string }) {
+// フォルダSVG（GitHub Octicon file-directory・currentColor）
+function IconFolder() {
   return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill={color} aria-hidden><path d="M1.5 3.5A1 1 0 012.5 2.5h3.086a1 1 0 01.707.293l1.121 1.121A1 1 0 008.121 4.5H13.5A1 1 0 0114.5 5.5v7a1 1 0 01-1 1h-11a1 1 0 01-1-1v-9z"/></svg>
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden><path d="M1.75 2A1.75 1.75 0 0 0 0 3.75v8.5C0 13.216.784 14 1.75 14h12.5A1.75 1.75 0 0 0 16 12.25v-7.5A1.75 1.75 0 0 0 14.25 3H7.81a.25.25 0 0 1-.177-.073L6.323 1.616A1.75 1.75 0 0 0 5.085 1H1.75ZM1.5 3.75a.25.25 0 0 1 .25-.25h3.335a.25.25 0 0 1 .177.073l1.31 1.311c.329.329.775.514 1.24.516H14.25a.25.25 0 0 1 .25.25v7.5a.25.25 0 0 1-.25.25H1.75a.25.25 0 0 1-.25-.25v-8.5Z"/></svg>
   );
 }
 
-// ファイルSVG
-function IconFile({ color }: { color: string }) {
+// コードファイルSVG（stroke・currentColor）
+function IconFileCode() {
   return (
-    <svg width="12" height="12" viewBox="0 0 16 16" fill={color} aria-hidden><path d="M4 1.5A1.5 1.5 0 002.5 3v10A1.5 1.5 0 004 14.5h8A1.5 1.5 0 0013.5 13V5.5L10 2H4zm5.5 4V2.25L12.75 5.5H9.5z"/></svg>
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3.5 1.5h6L13 5v9a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5Z"/><path d="M9.5 1.5V5h3.5"/><path d="M6 8 4.5 9.5 6 11"/><path d="M9 8l1.5 1.5L9 11"/></svg>
   );
 }
 
-// 拡張子 → アイコン色
-const EXT_COLORS: Record<string, string> = {
-  tsx: "#58a6ff", ts: "#3b82f6", css: "#7ee8fa",
-  md: "#768390", json: "#e3b341", rs: "#f07178", toml: "#e8b250",
+// テキストファイルSVG（stroke・currentColor）
+function IconFileText() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3.5 1.5h6L13 5v9a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5Z"/><path d="M9.5 1.5V5h3.5"/><path d="M5 8h5"/><path d="M5 10.25h5"/><path d="M5 12.5h3"/></svg>
+  );
+}
+
+// その他ファイルSVG（stroke・currentColor）
+function IconFileGeneric() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3.5 1.5h6L13 5v9a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5Z"/><path d="M9.5 1.5V5h3.5"/></svg>
+  );
+}
+
+// アイコンの形（ファイル種別の見た目）を決める拡張子グループ
+const CODE_SHAPE_EXT = new Set([
+  "ts", "tsx", "js", "jsx", "mjs", "cjs", "css", "scss", "sass", "less",
+  "html", "htm", "json", "json5", "jsonc", "jsonl", "ndjson", "yaml", "yml", "toml", "rs", "sh", "bash", "zsh", "ps1",
+  "py", "pyw", "go",
+  "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "cs",
+  "java", "dart",
+]);
+const TEXT_SHAPE_EXT = new Set(["md", "markdown", "txt", "csv", "rtf"]);
+
+// 拡張子 → 着色クラス（よく使うファイルはツール・サービスの連想色、マイナーな拡張子は無彩色のまま）
+const EXT_COLOR_CLASS: Record<string, string> = {
+  ts: "ico-ts", tsx: "ico-tsx",
+  js: "ico-js", jsx: "ico-js", mjs: "ico-js", cjs: "ico-js",
+  css: "ico-css",
+  scss: "ico-scss", sass: "ico-scss", less: "ico-scss",
+  html: "ico-html", htm: "ico-html",
+  json: "ico-json", json5: "ico-json", jsonc: "ico-json", jsonl: "ico-json", ndjson: "ico-json",
+  yaml: "ico-yaml", yml: "ico-yaml",
+  rs: "ico-rs",
+  toml: "ico-toml",
+  sh: "ico-sh", bash: "ico-sh", zsh: "ico-sh", ps1: "ico-sh",
+  md: "ico-md", markdown: "ico-md",
+  txt: "ico-txt",
+  pdf: "ico-pdf",
+  doc: "ico-docx", docx: "ico-docx", rtf: "ico-docx",
+  xls: "ico-xlsx", xlsx: "ico-xlsx", xlsm: "ico-xlsx", csv: "ico-xlsx",
+  ppt: "ico-ppt", pptx: "ico-ppt",
+  png: "ico-image", jpg: "ico-image", jpeg: "ico-image", gif: "ico-image",
+  webp: "ico-image", svg: "ico-image", bmp: "ico-image", ico: "ico-image",
+  py: "ico-py", pyw: "ico-py",
+  pkl: "ico-py", pickle: "ico-py",
+  go: "ico-go",
+  exe: "ico-exe", dll: "ico-exe", msi: "ico-exe",
+  zip: "ico-zip", rar: "ico-zip", "7z": "ico-zip", tar: "ico-zip", gz: "ico-zip", bz2: "ico-zip",
+  c: "ico-cpp", h: "ico-cpp", cpp: "ico-cpp", cc: "ico-cpp", cxx: "ico-cpp", hpp: "ico-cpp", hh: "ico-cpp", hxx: "ico-cpp",
+  cs: "ico-csharp",
+  java: "ico-java",
+  dart: "ico-dart",
+  mp4: "ico-video", avi: "ico-video", mov: "ico-video", mkv: "ico-video", wmv: "ico-video", webm: "ico-video", flv: "ico-video", m4v: "ico-video",
+  mp3: "ico-audio", wav: "ico-audio", flac: "ico-audio", aac: "ico-audio", ogg: "ico-audio", m4a: "ico-audio", wma: "ico-audio",
 };
-function fileColor(ext: string): string {
-  return EXT_COLORS[ext.toLowerCase()] ?? "#6e7681";
+
+// 拡張子 → アイコンの種類とCSSクラス
+function fileIconFor(ext: string): { icon: ReactElement; className: string } {
+  const lower = ext.toLowerCase();
+  const colorClass = EXT_COLOR_CLASS[lower];
+  const className = colorClass ? `col-icon ${colorClass}` : "col-icon";
+  if (CODE_SHAPE_EXT.has(lower)) return { icon: <IconFileCode />, className };
+  if (TEXT_SHAPE_EXT.has(lower)) return { icon: <IconFileText />, className };
+  return { icon: <IconFileGeneric />, className };
 }
 
 interface Props {
@@ -60,26 +119,24 @@ export function HeatmapItem({ entry, isActive, index, onSelect, hasScore }: Prop
       // ヒートマップ背景はオーバーレイ（GPU合成、--heat-* はCSS変数経由でopacityのみ制御）
       style={{ position: "relative", width: "100%", textAlign: "left", ...heatStyle }}
     >
-      {/* ヒートマップ背景オーバーレイ（色・最終濃度はCSS変数 --heat-bg / --heat-opacity 経由） */}
-      {hasScore && (
-        <motion.span
-          className="heat-overlay"
-          aria-hidden
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.25, delay: index * 0.04 }}
-        />
-      )}
+      {/* ヒートマップ背景オーバーレイ（色・最終濃度はCSS変数 --heat-bg / --heat-opacity 経由）。
+          motion.spanでopacityを上書きするとCSSのcalc()が無効化され
+          スコア0でも全面着色されてしまうため、素のspanでCSS側のopacity計算に委ねる
+          （入場フェードはmotion.buttonの opacity 0→1 が乗算されてカバーする） */}
+      {hasScore && <span className="heat-overlay" aria-hidden />}
 
       {/* 左端ヒートバー：面のopacityでは潰れる低スコア帯を輝度差で判別させる */}
       {hasScore && <span className="item-heatbar" aria-hidden />}
 
-      {/* アイコン */}
-      <span className="col-icon">
-        {entry.is_dir
-          ? <IconFolder color="#c69026" />
-          : <IconFile   color={fileColor(entry.ext)} />}
-      </span>
+      {/* アイコン: フォルダ = --folder、コードファイル = --c-tsx に統一着色（mock.html準拠） */}
+      {entry.is_dir ? (
+        <span className="col-icon ico-folder"><IconFolder /></span>
+      ) : (
+        (() => {
+          const { icon, className } = fileIconFor(entry.ext);
+          return <span className={className}>{icon}</span>;
+        })()
+      )}
 
       {/* 名前 */}
       <span className="col-name">

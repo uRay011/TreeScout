@@ -197,18 +197,20 @@ mod tests {
     }
 
     #[test]
-    fn run_with_paths_returns_top_k() {
+    fn run_with_paths_returns_all_phase1_candidates() {
         let paths = vec![
             pb("/src/components/Button.tsx"),
             pb("/src/components/Input.tsx"),
             pb("/src/hooks/useButton.ts"),
             pb("/src/utils/format.ts"),
         ];
-        let config = AstarConfig { top_k: 2, lambda: 0.0, mu: 0.0 };
+        // Phase1候補は top_k に関わらず全件スコアリングされて返る
+        let config = AstarConfig { top_k: 2, lambda: 0.0, mu: 0.0, ..Default::default() };
         let mut cb = NoopCallback;
         let results = run_with_paths(&config, &paths, dummy_heuristic, dummy_scorer, &mut cb);
-        assert_eq!(results.len(), 2);
+        assert_eq!(results.len(), 4);
         assert!(results[0].score >= results[1].score);
+        assert!(results.iter().all(|r| r.in_phase1));
     }
 
     #[test]
@@ -218,7 +220,7 @@ mod tests {
             pb("/src/components/Input.tsx"),
             pb("/src/hooks/useButton.ts"),
         ];
-        let config = AstarConfig { top_k: 3, lambda: 0.0, mu: 0.0 };
+        let config = AstarConfig { top_k: 3, lambda: 0.0, mu: 0.0, ..Default::default() };
         let mut cb = NoopCallback;
         let results = run_with_paths(&config, &paths, dummy_heuristic, dummy_scorer, &mut cb);
         assert_eq!(results[0].path.file_name().unwrap(), "Button.tsx");
@@ -265,7 +267,7 @@ mod tests {
             pb("/root/a/y.txt"),
             pb("/root/b/z.txt"),
         ];
-        let config = AstarConfig { top_k: 10, lambda: 0.0, mu: 0.0 };
+        let config = AstarConfig { top_k: 10, lambda: 0.0, mu: 0.0, ..Default::default() };
         let mut cb = EventCounter { dirs: 0, files: 0 };
         let results = run_with_paths(
             &config,

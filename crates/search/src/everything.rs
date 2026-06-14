@@ -7,9 +7,20 @@ use std::sync::{Mutex, OnceLock};
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
-use windows::Win32::Storage::FileSystem::FileTimeToLocalFileTime;
+use windows::Win32::Storage::FileSystem::{FileTimeToLocalFileTime, GetLogicalDrives};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::Time::FileTimeToSystemTime;
+
+/// 利用可能な論理ドライブのルートパス一覧（例: ["C:\\", "D:\\", "E:\\"]）を返す。
+///
+/// 左ペイン「PC」階層に、検索結果が0件のドライブもグレー表示するために使う。
+pub fn list_drives() -> Vec<String> {
+    let mask = unsafe { GetLogicalDrives() };
+    (0..26)
+        .filter(|bit| mask & (1 << bit) != 0)
+        .map(|bit| format!("{}:\\", (b'A' + bit as u8) as char))
+        .collect()
+}
 
 /// Everything DLL はプロセス内でグローバルなクエリ状態を1つだけ持つ。
 /// `search()` と `browse()` が同時に呼ばれると互いの SetSearchW/QueryW 呼び出しが
@@ -54,7 +65,7 @@ pub enum SearchError {
 }
 
 /// Everything のマッチングオプション（検索メニューのトグルに対応）
-#[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct MatchOptions {
     /// 大文字小文字の区別（Ctrl+I）
@@ -72,6 +83,8 @@ pub struct SearchResult {
     pub folder: String,
     pub is_dir: bool,
     pub ext: String,
+    pub size: u64,
+    pub mtime: i64,
 }
 
 // Everything SDK エラーコード
@@ -206,7 +219,12 @@ pub fn search(query: &str, max: u32, opts: MatchOptions, gen: u64) -> Result<Vec
         return Err(SearchError::Cancelled);
     }
     unsafe {
-        (api.set_request_flags)(EVERYTHING_REQUEST_FILE_NAME | EVERYTHING_REQUEST_PATH);
+        (api.set_request_flags)(
+            EVERYTHING_REQUEST_FILE_NAME
+                | EVERYTHING_REQUEST_PATH
+                | EVERYTHING_REQUEST_SIZE
+                | EVERYTHING_REQUEST_DATE_MODIFIED,
+        );
         (api.set_max)(max);
         (api.set_match_case)(opts.case_sensitive as i32);
         (api.set_match_whole_word)(opts.whole_word as i32);
@@ -234,6 +252,16 @@ pub fn search(query: &str, max: u32, opts: MatchOptions, gen: u64) -> Result<Vec
             let dir = pcwstr_to_string((api.get_result_path_w)(i));
             let is_file = (api.is_file_result)(i) != 0;
 
+            let mut size: i64 = 0;
+            if (api.get_result_size)(i, &mut size as *mut i64) == 0 {
+                size = 0;
+            }
+
+            let mut mtime: i64 = 0;
+            if (api.get_result_date_modified)(i, &mut mtime as *mut i64) == 0 {
+                mtime = 0;
+            }
+
             let full_path = PathBuf::from(&dir).join(&name);
             let ext = if is_file {
                 PathBuf::from(&name)
@@ -249,6 +277,8 @@ pub fn search(query: &str, max: u32, opts: MatchOptions, gen: u64) -> Result<Vec
                 folder: dir,
                 is_dir: !is_file,
                 ext,
+                size: size.max(0) as u64,
+                mtime,
             });
         }
 
@@ -276,11 +306,24 @@ fn path_basename_lower(path: &str) -> String {
         .to_lowercase()
 }
 
-/// 取得済みの `BrowseRow` を `EVERYTHING_SORT_*` 定数に従ってRust側でソートする。
+/// 取得済みの `BrowseRow` を `EVERYTHING_SORT_*` 定数に従って並べた「表示順インデックス」を返す。
+///
+/// 行自体は自然順のまま据え置き、表示順は `Vec<u32>`（rows へのインデックス）で表現する。
+/// これにより、ソート列だけが変わる再ソートで行データを再取得・複製せずに済む。
 ///
 /// `Everything_SetSort` はインストール環境によってはIPC経由で結果が0件になる
 /// （SDKバージョン不整合等）ため使用せず、クライアント側で安定ソートする。
-fn sort_browse_rows(rows: &mut [BrowseRow], sort: u32) {
+///
+/// `EVERYTHING_SORT_NAME_ASCENDING` は QueryW のクエリ結果が既にこの順序で
+/// 返ってくる（自然順 == 名前昇順、実機検証済み）ため、恒等インデックスを返して
+/// O(N log N)のソートを丸ごと省略する。170万件規模で約5秒の短縮になる。
+pub fn sort_order(rows: &[BrowseRow], sort: u32) -> Vec<u32> {
+    let mut order: Vec<u32> = (0..rows.len() as u32).collect();
+
+    if sort == EVERYTHING_SORT_NAME_ASCENDING {
+        return order;
+    }
+
     let desc = matches!(
         sort,
         EVERYTHING_SORT_NAME_DESCENDING
@@ -291,27 +334,29 @@ fn sort_browse_rows(rows: &mut [BrowseRow], sort: u32) {
 
     match sort {
         EVERYTHING_SORT_PATH_ASCENDING | EVERYTHING_SORT_PATH_DESCENDING => {
-            rows.sort_by_cached_key(|r| r.path.to_lowercase());
+            order.sort_by_cached_key(|&i| rows[i as usize].path.to_lowercase());
         }
         EVERYTHING_SORT_SIZE_ASCENDING | EVERYTHING_SORT_SIZE_DESCENDING => {
-            rows.sort_by_key(|r| r.size);
+            order.sort_by_key(|&i| rows[i as usize].size);
         }
         EVERYTHING_SORT_DATE_MODIFIED_ASCENDING | EVERYTHING_SORT_DATE_MODIFIED_DESCENDING => {
-            rows.sort_by_key(|r| r.mtime);
+            order.sort_by_key(|&i| rows[i as usize].mtime);
         }
         _ => {
-            rows.sort_by_cached_key(|r| path_basename_lower(&r.path));
+            order.sort_by_cached_key(|&i| path_basename_lower(&rows[i as usize].path));
         }
     }
     if desc {
-        rows.reverse();
+        order.reverse();
     }
+    order
 }
 
-/// Everything で全件取得し、Rust側でソートする（owner-data ListView モデル）。
+/// Everything で全件取得する（owner-data ListView モデル）。
 ///
-/// `sort` には `EVERYTHING_SORT_*` 定数を指定する。`max` 件まで取得し、
-/// 結果は `BrowseRow` としてフルパス・サイズ・更新日時のみ保持する。
+/// 結果は Everything が返す自然順（== 名前昇順）の `BrowseRow` で、フルパス・サイズ・
+/// 更新日時のみ保持する。ソートは行データに手を加えず `sort_order` で表示順インデックスを
+/// 別途求める（ソート列だけ変える再ソート時に全件再取得しないため）。
 ///
 /// `gen` には `next_generation()` の世代番号を渡す。全件抽出は数十万〜百万件規模で
 /// 重いため、途中で新しい検索が始まると `SearchError::Cancelled` を返して打ち切り、
@@ -319,7 +364,6 @@ fn sort_browse_rows(rows: &mut [BrowseRow], sort: u32) {
 /// （呼び出し側で時間スロットルする想定）。
 pub fn browse<F: FnMut(usize)>(
     query: &str,
-    sort: u32,
     max: u32,
     opts: MatchOptions,
     gen: u64,
@@ -394,12 +438,46 @@ pub fn browse<F: FnMut(usize)>(
             });
         }
 
-        // ソート（O(N log N)）も重いので、その前に最終キャンセルチェック
         if !is_current(gen) {
             return Err(SearchError::Cancelled);
         }
-        sort_browse_rows(&mut results, sort);
         Ok(results)
+    }
+}
+
+/// 【調査用一時関数】0件表示の原因調査用の診断情報を文字列で返す。
+///
+/// DLLロード状況・`Everything_QueryW`の戻り値・`GetLastError`・件数を1回のクエリで
+/// まとめて取得する。原因判明後に削除する。
+pub fn diag(query: &str, opts: MatchOptions) -> String {
+    let api_result = API.get_or_init(|| unsafe { load_api() });
+    let api = match api_result {
+        Ok(a) => a,
+        Err(e) => return format!("dll_load_err={e}"),
+    };
+
+    let query_w = query_to_wide(query);
+    let _guard = QUERY_LOCK.lock().unwrap();
+    unsafe {
+        (api.set_request_flags)(EVERYTHING_REQUEST_FILE_NAME | EVERYTHING_REQUEST_PATH);
+        (api.set_max)(10);
+        (api.set_match_case)(opts.case_sensitive as i32);
+        (api.set_match_whole_word)(opts.whole_word as i32);
+        (api.set_match_path)(opts.match_path as i32);
+        (api.set_search_w)(PCWSTR(query_w.as_ptr()));
+
+        let ret = (api.query_w)(1);
+        let err = (api.get_last_error)();
+        let count = (api.get_num_results)();
+        let first_name = if count > 0 {
+            pcwstr_to_string((api.get_result_file_name_w)(0))
+        } else {
+            String::new()
+        };
+        format!(
+            "dll_load=ok query=\"{}\" query_w_ret={ret} last_error={err} count={count} first={first_name:?}",
+            String::from_utf16_lossy(&query_w[..query_w.len().saturating_sub(1)]),
+        )
     }
 }
 
@@ -433,3 +511,4 @@ pub fn format_mtime(ft: i64) -> String {
         )
     }
 }
+

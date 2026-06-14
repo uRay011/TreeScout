@@ -222,7 +222,10 @@ lindera = { version = "0.33", features = ["ipadic"] }  # IPAdic辞書同梱
 
 ## 5. A*探索エンジン
 
-Everything絞り込み後の仮想ツリー上でA*を走らせ、全ファイルをベクトル化せずに上位K件を効率的に発見する。
+Everything絞り込み後の仮想ツリー上でA*を走らせ、全ファイルをベクトル化せずに以下2つの役割を果たす。
+
+- **Phase1候補内のスコアリング**：候補ファイルにヒートマップ用スコア（f値）を付与する（表示そのものはPhase1結果を全件維持し、取りこぼしを発生させない）
+- **Phase1候補外のAIサジェスト探索**：候補に含まれないディレクトリも高スコアパスのみ追加探索し、見つかった高スコアファイルをAIサジェスト（上位K件）としてPhase1結果にdedup統合する
 
 **コスト関数：**
 ```
@@ -249,7 +252,7 @@ h(node): ヒューリスティック（推定関連度）
 
 [A*探索時（オンデマンド）]
   A*が「開いた」ディレクトリのファイルのみベクトル化
-  → 全ファイルの 5〜10% のベクトル化で高品質上位K件が得られる想定
+  → 全ファイルの 5〜10% のベクトル化でPhase1候補のスコアリング＋AIサジェスト探索が完了する想定
 ```
 
 **ホットパス最適化（速度の肝）：**
@@ -264,29 +267,38 @@ use std::collections::BinaryHeap;
 use std::cmp::Reverse;
 
 struct SearchNode {
-    path:     PathBuf,
-    f_score:  f32,          // A*スコア（= h - g、最大ヒープ用に符号反転）
-    g_cost:   f32,          // 探索コスト
-    h_score:  f32,          // ヒューリスティック（フォルダembedding類似度）
-    is_file:  bool,
+    path:      PathBuf,
+    f_score:   f32,          // A*スコア（= h - g、最大ヒープ用に符号反転）
+    g_cost:    f32,          // 探索コスト
+    h_score:   f32,          // ヒューリスティック（フォルダembedding類似度）
+    is_file:   bool,
+    in_phase1: bool,         // Everything候補（Phase1結果）に含まれるか
 }
 
 // 優先度付きキュー（最大ヒープ）
 let mut queue: BinaryHeap<SearchNode> = BinaryHeap::new();
+let mut phase1_pending = phase1_results.len(); // スコア未付与のPhase1候補数
 
 // 探索ループ
 while let Some(node) = queue.pop() {
-    if results.len() >= K { break; }
+    // Phase1候補を全件スコアリングし、AIサジェストがK_SUGGEST件揃ったら終了
+    if phase1_pending == 0 && suggestions.len() >= K_SUGGEST { break; }
     if node.is_file {
         // ファイル到達: 精密ベクトル化してスコア確定
         let score = embed_and_score(&node.path, &query_vec);
-        results.push((node.path, score));
+        if node.in_phase1 {
+            heatmap_scores.insert(node.path, score); // Phase1結果へのスコア付与
+            phase1_pending -= 1;
+        } else if score > SUGGEST_THRESHOLD {
+            suggestions.push((node.path, score));    // Phase1候補外 → AIサジェスト
+        }
     } else {
         // ディレクトリ展開: 子ノードをヒューリスティック評価してキューへ
         for child in expand(&node.path) {
             let h = folder_embedding_sim(&child, &query_vec);
             let g = depth(&child) as f32 * λ;
-            queue.push(SearchNode { f_score: h - g, g_cost: g, h_score: h, .. });
+            let in_phase1 = phase1_set.contains(&child);
+            queue.push(SearchNode { f_score: h - g, g_cost: g, h_score: h, in_phase1, .. });
         }
     }
 }
@@ -298,7 +310,8 @@ while let Some(node) = queue.pop() {
 |------|---------------------|---------|
 | ベクトル化ファイル数 | 10万件 | ~500件（5%） |
 | 探索時間 | 数十秒 | <150ms |
-| 上位K件精度 | 100% | ~90%（上位結果は同等） |
+| Phase1結果の網羅性 | 100% | 100%（全件表示・取りこぼしなし） |
+| AIサジェスト再現率 | - | ~90%（候補外の上位は概ね捕捉） |
 
 > **Beam Search / Best-First Searchとの関係**：ファイル検索は「最短経路保証」が不要なため、
 > 厳密なA*のadmissibility制約は課さない。λ・μのチューニングで精度と速度を実行時調整できる
@@ -345,4 +358,4 @@ strip = true         # シンボル除去
 
 ---
 
-*作成日: 2026-06-08 / 更新日: 2026-06-11*
+*作成日: 2026-06-08 / 更新日: 2026-06-12*

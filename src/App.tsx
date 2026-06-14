@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useLayoutEffect } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -16,8 +16,10 @@ import {
   AstarColumn,
   AstarEntry,
   buildColumnsFromEvents,
+  fillMissingEntries,
   basename,
   listDirectory,
+  listDrives,
   BrowseSort,
   BrowseSortCol,
   MatchOptions,
@@ -205,6 +207,12 @@ export default function App() {
   // ルートフォルダ（探索範囲の絞り込み。既定は未指定＝ドライブ全体）
   const [rootPath, setRootPath] = useState("");
 
+  // 「PC」階層に表示する論理ドライブ一覧（検索結果0件のドライブもグレー表示するため）
+  const [allDrives, setAllDrives] = useState<string[]>([]);
+  useEffect(() => {
+    listDrives().then(setAllDrives).catch(() => {});
+  }, []);
+
   // 検索モード（AI / フィルタ）と左ペインのデータ供給モード（配列 / 窓取得）
   const [searchMode, setSearchMode] = useState<SearchMode>(loadSearchMode);
   const [leftPaneMode, setLeftPaneMode] = useState<"array" | "window">("array");
@@ -257,13 +265,13 @@ export default function App() {
       setPhase("Everything 検索中…");
       try {
         // 全件抽出中は件数をライブ表示（全ドライブ等で数十秒かかる間も状況が分かる）
-        const total = await browseWin.runBrowse(everythingQuery, browseSort, searchOptions, (p) => {
+        const { total, debug } = await browseWin.runBrowse(everythingQuery, browseSort, searchOptions, (p) => {
           if (seq !== searchSeqRef.current) return;
           setPhase(`Everything 取得中… ${p.count.toLocaleString()}件`);
         });
         if (seq !== searchSeqRef.current) return;
         stopElapsedTimer(performance.now() - t0);
-        setPhase(`完了 — ${total}件 / ${Math.round(performance.now() - t0)}ms`);
+        setPhase(`完了 — ${total}件 / ${Math.round(performance.now() - t0)}ms${debug ? ` [${debug}]` : ""}`);
       } catch {
         if (seq !== searchSeqRef.current) return;
         stopElapsedTimer(performance.now() - t0);
@@ -346,7 +354,7 @@ export default function App() {
         onExplore: (ev) => {
           if (seq !== searchSeqRef.current) return; // 古い実行からの遅延イベントは無視（カラム重複防止）
           exploreEventsRef.current.push(ev);
-          setColumns(buildColumnsFromEvents(exploreEventsRef.current, rootPath));
+          setColumns(buildColumnsFromEvents(exploreEventsRef.current, rootPath, allDrives));
           if (!phaseAdvanced) {
             phaseAdvanced = true;
             setPhase("Phase 2: A*探索…");
@@ -359,6 +367,16 @@ export default function App() {
         },
       });
       if (seq !== searchSeqRef.current) return;
+
+      // 探索ログには「ヒットへの経路」しか登場しないため、各カラムの実フォルダを
+      // listDirectory で読み直し、A*が触れなかった他のエントリを非ヒット表示で補完する
+      try {
+        const filled = await fillMissingEntries(buildColumnsFromEvents(exploreEventsRef.current, rootPath, allDrives), query);
+        if (seq === searchSeqRef.current) setColumns(filled);
+      } catch {
+        // 補完に失敗しても探索ログベースのカラム表示はそのまま残す
+      }
+
       // SemanticResult → SearchResult（ResultList 互換）に変換
       const normalized: SearchResult[] = items.map(r => ({
         name: r.name,
@@ -366,9 +384,10 @@ export default function App() {
         folder: r.path.replace(/[\\/][^\\/]+$/, "") || r.path,
         is_dir: r.is_dir,
         ext: r.ext,
-        size: 0,
-        modified: "",
+        size: r.size,
+        modified: r.modified,
         score: r.score,
+        is_suggestion: r.is_suggestion,
       }));
       setResults(normalized);
       stopElapsedTimer(performance.now() - t0);
@@ -381,7 +400,7 @@ export default function App() {
     } finally {
       if (seq === searchSeqRef.current) setIsLoading(false);
     }
-  }, [query, rootPath, searchMode, browseSort, searchOptions, browseWin.runBrowse, startElapsedTimer, stopElapsedTimer]);
+  }, [query, rootPath, searchMode, browseSort, searchOptions, browseWin.runBrowse, startElapsedTimer, stopElapsedTimer, allDrives]);
 
   // ルートフォルダ選択ダイアログ
   const handleBrowseRoot = useCallback(async () => {
@@ -557,6 +576,17 @@ export default function App() {
     const target = e.target as HTMLElement;
     setHintsMode(target.closest(".file-list") ? "list" : "default");
   }, []);
+
+  // windowSourceをメモ化し、毎レンダー新規オブジェクトになることでResultList側の
+  // ensureRange用useEffectが無駄に再実行されるのを防ぐ
+  const windowSource = useMemo(
+    () => leftPaneMode === "window" ? {
+      total: browseWin.total,
+      getRow: browseWin.getRow,
+      ensureRange: browseWin.ensureRange,
+    } : undefined,
+    [leftPaneMode, browseWin.total, browseWin.getRow, browseWin.ensureRange]
+  );
 
   // ── キーボードナビゲーション ──
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -912,11 +942,7 @@ export default function App() {
         <div ref={leftPaneRef} style={{ width: 320 }}>
           <ResultList
             results={results}
-            windowSource={leftPaneMode === "window" ? {
-              total: browseWin.total,
-              getRow: browseWin.getRow,
-              ensureRange: browseWin.ensureRange,
-            } : undefined}
+            windowSource={windowSource}
             sort={leftPaneMode === "window" ? browseSort : undefined}
             onSortChange={handleListSortChange}
             selectedIndex={selectedIndex}

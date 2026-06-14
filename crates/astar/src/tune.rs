@@ -256,7 +256,7 @@ pub fn grid_search_case(case: &EvalCase) -> Vec<EvalMetrics> {
 
     for &lambda in LAMBDA_GRID {
         for &mu in MU_GRID {
-            let config = AstarConfig { lambda, mu, top_k: case.top_k };
+            let config = AstarConfig { lambda, mu, top_k: case.top_k, ..Default::default() };
             let engine = AstarEngine::new(
                 config,
                 |p| heuristic_fn(p),
@@ -287,7 +287,7 @@ pub fn run_full_grid_search(cases: &[EvalCase]) -> Vec<GridSearchReport> {
 
         for &lambda in LAMBDA_GRID {
             for &mu in MU_GRID {
-                let config = AstarConfig { lambda, mu, top_k: case.top_k };
+                let config = AstarConfig { lambda, mu, top_k: case.top_k, ..Default::default() };
                 let engine = AstarEngine::new(
                     config,
                     |p| heuristic_fn(p),
@@ -415,7 +415,7 @@ mod tests {
             let sf = keyword_scorer(case.query);
 
             let config_greedy =
-                AstarConfig { lambda: 0.0, mu: 0.0, top_k: case.paths.len() };
+                AstarConfig { lambda: 0.0, mu: 0.0, top_k: case.paths.len(), ..Default::default() };
             let engine = AstarEngine::new(config_greedy, |p| hf(p), |p| sf(p));
             let mut cb = CountingCallback { vectorized_count: 0 };
             let results = engine.search(&tree, &mut cb);
