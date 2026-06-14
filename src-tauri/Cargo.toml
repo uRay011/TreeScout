@@ -30,5 +30,5 @@ nlp = { path = "../crates/nlp" }
 astar = { path = "../crates/astar" }
 preview = { path = "../crates/preview" }
 index = { path = "../crates/index" }
-embedding = { path = "../crates/embedding", default-features = false }
+embedding = { path = "../crates/embedding", default-features = false, features = ["static"] }
 

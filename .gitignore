@@ -19,6 +19,9 @@ Cargo.lock
 # Local sync scripts
 scripts/
 
+# 埋め込みモデル（model2vec, ~275MB）。リポジトリには含めず別途配置する
+src-tauri/resources/embedding-model/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

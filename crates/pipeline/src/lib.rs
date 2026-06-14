@@ -146,9 +146,13 @@ where
 
 /// Everything を使わずパスリストを直接渡して A* まで実行する。
 /// 単体テスト・統合テストで利用する。
+///
+/// `extra_folders` には Phase1候補外の探索対象（folders.bin由来のフォルダembedding
+/// 近傍など）を渡す。`VirtualTree::with_extra_folders` 経由で兄弟/親探索の対象として開放される。
 pub fn run_with_paths<H, S>(
     config: &AstarConfig,
     paths: &[PathBuf],
+    extra_folders: &[PathBuf],
     heuristic: H,
     scorer: S,
     callback: &mut dyn ExploreCallback,
@@ -160,7 +164,7 @@ where
     if paths.is_empty() {
         return vec![];
     }
-    let tree = VirtualTree::from_paths(paths);
+    let tree = VirtualTree::from_paths(paths).with_extra_folders(extra_folders);
     let engine = AstarEngine::new(config.clone(), heuristic, scorer);
     engine.search(&tree, callback)
 }
@@ -207,7 +211,7 @@ mod tests {
         // Phase1候補は top_k に関わらず全件スコアリングされて返る
         let config = AstarConfig { top_k: 2, lambda: 0.0, mu: 0.0, ..Default::default() };
         let mut cb = NoopCallback;
-        let results = run_with_paths(&config, &paths, dummy_heuristic, dummy_scorer, &mut cb);
+        let results = run_with_paths(&config, &paths, &[], dummy_heuristic, dummy_scorer, &mut cb);
         assert_eq!(results.len(), 4);
         assert!(results[0].score >= results[1].score);
         assert!(results.iter().all(|r| r.in_phase1));
@@ -222,7 +226,7 @@ mod tests {
         ];
         let config = AstarConfig { top_k: 3, lambda: 0.0, mu: 0.0, ..Default::default() };
         let mut cb = NoopCallback;
-        let results = run_with_paths(&config, &paths, dummy_heuristic, dummy_scorer, &mut cb);
+        let results = run_with_paths(&config, &paths, &[], dummy_heuristic, dummy_scorer, &mut cb);
         assert_eq!(results[0].path.file_name().unwrap(), "Button.tsx");
     }
 
@@ -230,7 +234,7 @@ mod tests {
     fn empty_paths_returns_empty() {
         let config = AstarConfig::default();
         let mut cb = NoopCallback;
-        let results = run_with_paths(&config, &[], dummy_heuristic, dummy_scorer, &mut cb);
+        let results = run_with_paths(&config, &[], &[], dummy_heuristic, dummy_scorer, &mut cb);
         assert!(results.is_empty());
     }
 
@@ -272,6 +276,7 @@ mod tests {
         let results = run_with_paths(
             &config,
             &paths,
+            &[],
             |_| 0.5,
             |_| 0.5,
             &mut cb,

@@ -506,7 +506,7 @@ pub fn format_mtime(ft: i64) -> String {
         }
 
         format!(
-            "{:04}-{:02}-{:02} {:02}:{:02}",
+            "{:04}/{:02}/{:02} {:02}:{:02}",
             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute
         )
     }

@@ -64,3 +64,34 @@ impl Embedder for StaticEmbedder {
         self.dim
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cosine_f32;
+
+    // 変換済みモデル（~275MB、.gitignore対象）が `src-tauri/resources/embedding-model/`
+    // に無い環境では配置手順未実施のためスキップする。
+    #[test]
+    fn loads_f16_model_and_embeds_cross_lingual() {
+        let model_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri/resources/embedding-model");
+        if !model_dir.join("model.safetensors").exists() {
+            eprintln!("skip: embedding model not found at {}", model_dir.display());
+            return;
+        }
+
+        let embedder = StaticEmbedder::from_dir(&model_dir).expect("モデルロード失敗");
+        assert_eq!(embedder.dim(), 256);
+
+        let v_ja = embedder.embed_one("請求書");
+        let v_en = embedder.embed_one("invoice");
+        let v_unrelated = embedder.embed_one("猫");
+
+        let sim_cross = cosine_f32(&v_ja, &v_en);
+        let sim_unrelated = cosine_f32(&v_ja, &v_unrelated);
+        assert!(
+            sim_cross > sim_unrelated,
+            "日英cosine({sim_cross}) は無関係語cosine({sim_unrelated}) を上回るべき"
+        );
+    }
+}

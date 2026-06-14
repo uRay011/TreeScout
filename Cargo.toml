@@ -10,3 +10,9 @@ members = [
     "crates/preview",
 ]
 resolver = "2"
+
+# model2vec/tokenizers/safetensors の数値演算はdebugビルドだと未最適化で
+# 起動時のモデルロードが30秒近くかかる。サードパーティ依存全体を最適化し、
+# 自前クレート（ワークスペースメンバー）のデバッグ性とインクリメンタルビルド速度は維持する。
+[profile.dev.package."*"]
+opt-level = 3

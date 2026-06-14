@@ -17,6 +17,8 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
+use embedding::cosine_i8;
+
 use crate::error::IndexError;
 
 const HEADER_LEN: usize = 8; // u32: dim, u32: n
@@ -126,6 +128,25 @@ impl FolderEmbeddingMatrix {
     pub fn iter_embeddings(&self) -> impl Iterator<Item = &[i8]> {
         (0..self.len()).map(move |i| self.embedding(i))
     }
+
+    /// `query`（`quantize_f32_to_i8` と同スケールのint8埋め込み）に対し
+    /// cosine類似度が高い上位 `n` 件のフォルダパスを降順で返す。
+    ///
+    /// 次元不一致や空行列の場合は空を返す。
+    pub fn nearest(&self, query: &[i8], n: usize) -> Vec<(String, f32)> {
+        if query.len() != self.dim || self.is_empty() {
+            return vec![];
+        }
+        let mut scored: Vec<(String, f32)> = self
+            .paths
+            .iter()
+            .zip(self.iter_embeddings())
+            .map(|(path, emb)| (path.clone(), cosine_i8(query, emb)))
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(n);
+        scored
+    }
 }
 
 /// `&[u8]` を `&[i8]` として再解釈する（i8/u8 はメモリレイアウト互換）。
@@ -210,5 +231,46 @@ mod tests {
         let matrix = FolderEmbeddingMatrix::build(&path, &entries, 2).unwrap();
         let collected: Vec<&[i8]> = matrix.iter_embeddings().collect();
         assert_eq!(collected, vec![&[1i8, 1][..], &[2i8, 2][..]]);
+    }
+
+    #[test]
+    fn nearest_returns_top_n_sorted_by_similarity() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("folders.bin");
+        let entries = vec![
+            ("/exact".to_string(), vec![127i8, 0]),
+            ("/close".to_string(), vec![100i8, 40]),
+            ("/opposite".to_string(), vec![-127i8, 0]),
+            ("/orthogonal".to_string(), vec![0i8, 127]),
+        ];
+        let matrix = FolderEmbeddingMatrix::build(&path, &entries, 2).unwrap();
+
+        let query = [127i8, 0];
+        let top = matrix.nearest(&query, 2);
+
+        assert_eq!(top.len(), 2);
+        assert_eq!(top[0].0, "/exact");
+        assert_eq!(top[1].0, "/close");
+        assert!(top[0].1 >= top[1].1);
+    }
+
+    #[test]
+    fn nearest_with_dim_mismatch_returns_empty() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("folders.bin");
+        let entries = vec![("/a".to_string(), vec![1i8, 2, 3])];
+        let matrix = FolderEmbeddingMatrix::build(&path, &entries, 3).unwrap();
+
+        assert!(matrix.nearest(&[1i8, 2], 5).is_empty());
+    }
+
+    #[test]
+    fn nearest_on_empty_matrix_returns_empty() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("empty.bin");
+        FolderEmbeddingMatrix::build(&path, &[], 2).unwrap();
+        let matrix = FolderEmbeddingMatrix::open(&path).unwrap();
+
+        assert!(matrix.nearest(&[1i8, 0], 5).is_empty());
     }
 }
