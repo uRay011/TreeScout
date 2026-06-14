@@ -38,15 +38,37 @@ impl ParsedQuery {
             parts.push(format!("dm:{}", date));
         }
         for kw in &self.keywords {
-            if kw.contains(' ') {
-                parts.push(format!("\"{}\"", kw));
+            let term = everything_term(kw);
+            if term.contains(' ') {
+                parts.push(format!("\"{}\"", term));
             } else {
-                parts.push(kw.clone());
+                parts.push(term);
             }
         }
 
         parts.join(" ")
     }
+}
+
+/// Everythingへの問い合わせ語を生成する。
+///
+/// キーワード前半（最大 `len/2`、最低3文字）のprefixを使うことで、後半に
+/// 誤字・脱字・転置があるファイル名も Phase1 候補に含める（タイポ耐性）。
+/// 打ち切り後の文字列は元のキーワードの部分文字列なので、完全一致する
+/// ファイルも変わらず候補に残る。スコアリング（`score_path`）は元の
+/// キーワードで編集距離評価するため、ここでは Everything への問い合わせ
+/// 文字列のみを広げる。
+///
+/// 制約: 前半（保持したprefix部分）に誤字があるケースは捕捉できない
+/// （例: "xeport"→"xep" は "report" の部分文字列にならない）。
+fn everything_term(kw: &str) -> String {
+    let chars: Vec<char> = kw.chars().collect();
+    let len = chars.len();
+    let keep = (len / 2).max(3);
+    if keep >= len {
+        return kw.to_string();
+    }
+    chars[..keep].iter().collect()
 }
 
 /// 自然言語クエリをルールベースで解析する。
@@ -429,7 +451,42 @@ mod tests {
         assert!(s.contains("ext:pdf"));
         assert!(s.contains("dm:lastweek"));
         assert!(s.contains("size:>"));
-        assert!(s.contains("report"));
+        // "report"(6文字) は前半3文字に打ち切られて "rep" になる
+        assert!(s.contains("rep"));
+    }
+
+    #[test]
+    fn test_everything_term_truncates_long_keyword() {
+        let q = ParsedQuery {
+            keywords: vec!["reprot".to_string()],
+            ..Default::default()
+        };
+        let s = q.to_everything_query();
+        // 6文字 → 前半3文字 "rep" に打ち切られる
+        assert_eq!(s, "rep");
+    }
+
+    #[test]
+    fn test_everything_term_keeps_short_keyword() {
+        let q = ParsedQuery {
+            keywords: vec!["foo".to_string()],
+            ..Default::default()
+        };
+        let s = q.to_everything_query();
+        assert_eq!(s, "foo");
+    }
+
+    #[test]
+    fn test_everything_term_transposition_typo_survives_filter() {
+        // "report" の隣接転置タイポ "reprot" を打ち切ると "rep" になり、
+        // 正しいファイル名 "report" の部分文字列として残るため
+        // Everything の絞り込みを通過できる（Phase1候補に入る）。
+        let q = ParsedQuery {
+            keywords: vec!["reprot".to_string()],
+            ..Default::default()
+        };
+        let term = q.to_everything_query();
+        assert!("report".contains(&term), "term={term} should be substring of report");
     }
 
     #[test]
